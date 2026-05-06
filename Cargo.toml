@@ -1,0 +1,8 @@
+[workspace]
+name = "laniakea"
+version = "0.1.0"
+edition = "2024"
+members = [
+    "crates/laniakea-cli", "crates/laniakea-core",
+]
+resolver = "2"
