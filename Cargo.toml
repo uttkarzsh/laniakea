@@ -1,8 +1,28 @@
 [workspace]
 name = "laniakea"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 members = [
-    "crates/laniakea-cli", "crates/laniakea-core",
+    "crates/laniakea-core",
+    "crates/laniakea-cli",
+    "crates/laniakea-uniffi",
 ]
 resolver = "2"
+
+[workspace.dependencies]
+# zk stack
+ark-circom       = { version = "0.1", features = ["circom-2"] }
+ark-groth16      = { version = "0.4", default-features = false, features = ["r1cs"] }
+ark-bn254        = { version = "0.4" }
+ark-std          = { version = "0.4" }
+ark-serialize    = { version = "0.4" }
+num-bigint       = "0.4"
+
+# utilities
+anyhow           = "1"
+thiserror        = "1"
+serde            = { version = "1", features = ["derive"] }
+serde_json       = "1"
+
+# FFI
+uniffi           = "0.28"

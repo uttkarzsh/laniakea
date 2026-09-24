@@ -1,14 +1,10 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! laniakea-core: pure Rust proving logic
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub mod backend;
+pub mod error;
+pub mod witness;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use backend::groth16::Groth16Backend;
+pub use backend::{ProofOutput, ProvingArtifacts, WitnessInputs, ZkBackend};
+pub use error::LaniakeaError;
+

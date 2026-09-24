@@ -1,9 +1,8 @@
 [package]
-name = "laniakea-cli"
+name = "laniakea-uniffi"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 laniakea-core = { path = "../laniakea-core" }
-anyhow        = { workspace = true }
-serde_json    = { workspace = true }
+uniffi        = { workspace = true }
