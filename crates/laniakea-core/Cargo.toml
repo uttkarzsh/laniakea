@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-ark-circom    = { workspace = true }
+# Core zk stack (always)
 ark-groth16   = { workspace = true }
 ark-bn254     = { workspace = true }
 ark-std       = { workspace = true }
@@ -14,3 +14,18 @@ anyhow        = { workspace = true }
 thiserror     = { workspace = true }
 serde         = { workspace = true }
 serde_json    = { workspace = true }
+
+# Desktop-only: ark-circom for witness gen + zkey/R1CS parsing
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+ark-circom    = { workspace = true }
+tempfile      = "3"
+
+# iOS-only: wasmi-witness for witness generation
+[target.'cfg(target_os = "ios")'.dependencies]
+wasmi-witness = { path = "../wasmi-witness" }
+
+# macOS can use either (dev convenience)
+[target.'cfg(target_os = "macos")'.dependencies]
+ark-circom    = { workspace = true }
+wasmi-witness = { path = "../wasmi-witness" }
+tempfile      = "3"

@@ -3,8 +3,12 @@
 pub mod backend;
 pub mod error;
 pub mod witness;
+#[cfg(not(target_os = "ios"))]
+pub mod witness_ark;
+#[cfg(target_os = "ios")]
+pub mod witness_wasmi;
 
 pub use backend::groth16::Groth16Backend;
 pub use backend::{ProofOutput, ProvingArtifacts, WitnessInputs, ZkBackend};
 pub use error::LaniakeaError;
-
+pub use witness::{WitnessArtifacts, WitnessCalculator};

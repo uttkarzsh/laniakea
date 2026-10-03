@@ -1,4 +1,4 @@
-use super::{ProvingArtifacts, ProofOutput, WitnessInputs, ZkBackend};
+use super::{ProofOutput, ProvingArtifacts, WitnessInputs, ZkBackend};
 use crate::error::LaniakeaError;
 
 pub struct Groth16Backend;
