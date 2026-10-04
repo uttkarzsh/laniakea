@@ -5,24 +5,24 @@ use num_traits::{Signed, ToPrimitive, Zero};
 use thiserror::Error;
 use wasmi::{Caller, Engine, Linker, Memory, Module, Store};
 
-/// Errors specific to wasmi-witness crate
 #[derive(Debug, Error)]
 pub enum WasmiWitnessError {
     #[error("WASM module error: {0}")]
     Module(String),
+
     #[error("WASM instantiation error: {0}")]
     Instantiation(String),
+
     #[error("WASM execution error: {0}")]
     Execution(String),
+
     #[error("Memory read error: {0}")]
     MemoryRead(String),
+
     #[error("Witness generation error: {0}")]
     WitnessGeneration(String),
 }
 
-/// Low-level wasmi-based witness calculator.
-/// Produces BN254 Fr witness vector directly.
-/// No dependency on laniakea-core.
 pub struct WasmiWitnessCalculator {
     instance: wasmi::Instance,
     store: Store<()>,
@@ -33,84 +33,114 @@ pub struct WasmiWitnessCalculator {
 }
 
 impl WasmiWitnessCalculator {
-    /// Create from raw WASM bytes only (no R1CS needed).
-    pub fn new(wasm_bytes: Vec<u8>) -> Result<Self, WasmiWitnessError> {
+    pub fn new(wasm_bytes: &[u8]) -> Result<Self, WasmiWitnessError> {
         let engine = Engine::default();
-        let module = Module::new(&engine, &wasm_bytes)
+
+        let module = Module::new(&engine, &mut &wasm_bytes[..])
             .map_err(|e| WasmiWitnessError::Module(e.to_string()))?;
 
         let mut store = Store::new(&engine, ());
+
         let mut linker = Linker::new(&engine);
 
-        // Define no-op host imports required by Circom 2.0 WASM
+        /*
+         * Circom 2 WASM runtime imports.
+         *
+         * The generated age_check.wasm imports these functions but
+         * does not actually require WASI.
+         */
         linker
             .func_wrap(
                 "runtime",
                 "exceptionHandler",
-                |_: Caller<'_, ()>, _: i32| {},
+                |_caller: Caller<'_, ()>, _code: i32| {},
             )
             .map_err(|e| WasmiWitnessError::Instantiation(e.to_string()))?;
+
         linker
-            .func_wrap("runtime", "printErrorMessage", |_: Caller<'_, ()>| {})
+            .func_wrap("runtime", "printErrorMessage", |_caller: Caller<'_, ()>| {})
             .map_err(|e| WasmiWitnessError::Instantiation(e.to_string()))?;
+
         linker
-            .func_wrap("runtime", "writeBufferMessage", |_: Caller<'_, ()>| {})
+            .func_wrap(
+                "runtime",
+                "writeBufferMessage",
+                |_caller: Caller<'_, ()>| {},
+            )
             .map_err(|e| WasmiWitnessError::Instantiation(e.to_string()))?;
+
         linker
-            .func_wrap("runtime", "showSharedRWMemory", |_: Caller<'_, ()>| {})
+            .func_wrap(
+                "runtime",
+                "showSharedRWMemory",
+                |_caller: Caller<'_, ()>| {},
+            )
             .map_err(|e| WasmiWitnessError::Instantiation(e.to_string()))?;
 
         let instance = linker
             .instantiate_and_start(&mut store, &module)
             .map_err(|e| WasmiWitnessError::Instantiation(e.to_string()))?;
 
-        let memory = instance
-            .get_memory(&store, "memory")
-            .ok_or_else(|| WasmiWitnessError::Instantiation("memory export not found".into()))?;
+        /*
+         * Unlike ark-circom's Wasmer path, this Circom 2 module exports
+         * its own memory.
+         */
+        let memory = instance.get_memory(&store, "memory").ok_or_else(|| {
+            WasmiWitnessError::Instantiation("WASM module does not export `memory`".to_string())
+        })?;
 
-        // Call init() to initialize the circuit
-        let init = instance
-            .get_typed_func::<(), ()>(&store, "init")
-            .map_err(|e| WasmiWitnessError::Execution(e.to_string()))?;
-        init.call(&mut store, ())
-            .map_err(|e| WasmiWitnessError::Execution(e.to_string()))?;
-
-        // Get field parameters
-        let get_field_len = instance
+        /*
+         * Get field element size.
+         *
+         * For BN254 Circom WASM this is 8 32-bit limbs.
+         */
+        let get_field_num_len32 = instance
             .get_typed_func::<(), i32>(&store, "getFieldNumLen32")
-            .map_err(|e| WasmiWitnessError::Execution(e.to_string()))?;
-        let n32 = get_field_len
+            .map_err(|e| WasmiWitnessError::Instantiation(e.to_string()))?;
+
+        let n32 = get_field_num_len32
             .call(&mut store, ())
             .map_err(|e| WasmiWitnessError::Execution(e.to_string()))? as u32;
 
-        // Read prime modulus from WASM memory
+        /*
+         * Read the field prime.
+         *
+         * Circom writes the prime into the shared RW memory area.
+         */
         let get_raw_prime = instance
-            .get_typed_func::<(), i32>(&store, "getRawPrime")
-            .map_err(|e| WasmiWitnessError::Execution(e.to_string()))?;
-        let prime_ptr = get_raw_prime
+            .get_typed_func::<(), ()>(&store, "getRawPrime")
+            .map_err(|e| WasmiWitnessError::Instantiation(e.to_string()))?;
+
+        get_raw_prime
             .call(&mut store, ())
             .map_err(|e| WasmiWitnessError::Execution(e.to_string()))?;
 
-        // Read n32 * 4 bytes (u32 array) from memory at prime_ptr
-        let mut prime_arr = vec![0u32; n32 as usize];
-        for i in 0..n32 as usize {
-            let mut bytes = [0u8; 4];
-            memory
-                .read(&store, prime_ptr as usize + i * 4, &mut bytes)
-                .map_err(|e| WasmiWitnessError::MemoryRead(e.to_string()))?;
-            prime_arr[i] = u32::from_le_bytes(bytes);
+        let mut prime_limbs = Vec::with_capacity(n32 as usize);
+
+        for i in 0..n32 {
+            let limb = read_i32(&memory, &store, 1984 + (i as usize) * 4)
+                .map_err(|e| WasmiWitnessError::MemoryRead(e))?;
+
+            prime_limbs.push(limb as u32);
         }
 
-        // Convert to BigInt (little-endian u32 limbs)
-        let mut prime = BigInt::from(0);
-        for &limb in prime_arr.iter().rev() {
-            prime = (prime << 32) + BigInt::from(limb);
-        }
+        let prime = u32_limbs_to_bigint(&prime_limbs);
 
-        // Get number of public inputs
+        /*
+         * Number of public inputs/signals.
+         *
+         * age_check.wasm reports 2:
+         *
+         *   age
+         *   threshold
+         *
+         * Note that this is the number of input signals, not necessarily
+         * the number of public witness elements.
+         */
         let get_input_size = instance
             .get_typed_func::<(), i32>(&store, "getInputSize")
-            .map_err(|e| WasmiWitnessError::Execution(e.to_string()))?;
+            .map_err(|e| WasmiWitnessError::Instantiation(e.to_string()))?;
+
         let num_public = get_input_size
             .call(&mut store, ())
             .map_err(|e| WasmiWitnessError::Execution(e.to_string()))?
@@ -126,139 +156,336 @@ impl WasmiWitnessCalculator {
         })
     }
 
-    /// Calculate witness as BigInts, then convert to BN254 Fr.
     pub fn calculate_witness(
         &mut self,
         inputs: &[(String, Vec<BigInt>)],
     ) -> Result<Vec<Fr>, WasmiWitnessError> {
-        // Write inputs via setInputSignal
+        /*
+         * Circom 2 lifecycle:
+         *
+         *   init( sanity_check )
+         *   setInputSignal(...)
+         *   getWitnessSize()
+         *   getWitness(...)
+         */
+        let init = self
+            .instance
+            .get_typed_func::<i32, ()>(&self.store, "init")
+            .map_err(|e| WasmiWitnessError::Instantiation(e.to_string()))?;
+
+        init.call(&mut self.store, 1)
+            .map_err(|e| WasmiWitnessError::Execution(format!("init failed: {e}")))?;
+
         let set_input_signal = self
             .instance
             .get_typed_func::<(i32, i32, i32), ()>(&self.store, "setInputSignal")
-            .map_err(|e| WasmiWitnessError::Execution(e.to_string()))?;
+            .map_err(|e| WasmiWitnessError::Instantiation(e.to_string()))?;
 
-        let get_input_signal_size = self
+        /*
+         * Circom's generated WASM uses the shared RW memory for passing
+         * field elements into setInputSignal.
+         */
+        let write_shared_rw_memory = self
             .instance
-            .get_typed_func::<(i32, i32), i32>(&self.store, "getInputSignalSize")
-            .map_err(|e| WasmiWitnessError::Execution(e.to_string()))?;
+            .get_typed_func::<(i32, i32), ()>(&self.store, "writeSharedRWMemory")
+            .map_err(|e| WasmiWitnessError::Instantiation(e.to_string()))?;
 
+        /*
+         * Set every input.
+         *
+         * Circom uses FNV-1a hashing of the signal name to identify
+         * the signal internally.
+         */
         for (name, values) in inputs {
             let (msb, lsb) = fnv(name);
-            let signal_size = get_input_signal_size
-                .call(&mut self.store, (msb, lsb))
-                .map_err(|e| WasmiWitnessError::Execution(e.to_string()))?;
 
-            for (i, value) in values.iter().enumerate() {
-                if i >= signal_size as usize {
-                    break; // safety
-                }
-                // Convert BigInt to u32 limbs (little-endian)
+            for (index, value) in values.iter().enumerate() {
                 let limbs = bigint_to_u32_limbs(value, self.n32 as usize);
-                let write_rw = self
-                    .instance
-                    .get_typed_func::<(i32, i32), ()>(&self.store, "writeSharedRWMemory")
-                    .map_err(|e| WasmiWitnessError::Execution(e.to_string()))?;
+
+                /*
+                 * For the generated Circom 2 WASM, shared RW memory
+                 * receives little-endian 32-bit limbs.
+                 */
                 for (j, limb) in limbs.iter().enumerate() {
-                    write_rw
+                    write_shared_rw_memory
                         .call(&mut self.store, (j as i32, *limb as i32))
-                        .map_err(|e| WasmiWitnessError::Execution(e.to_string()))?;
+                        .map_err(|e| {
+                            WasmiWitnessError::Execution(format!(
+                                "writeSharedRWMemory({j}, {limb}) failed: {e}"
+                            ))
+                        })?;
                 }
+
                 set_input_signal
-                    .call(&mut self.store, (msb, lsb, i as i32))
-                    .map_err(|e| WasmiWitnessError::Execution(e.to_string()))?;
+                    .call(&mut self.store, (msb as i32, lsb as i32, index as i32))
+                    .map_err(|e| {
+                        WasmiWitnessError::Execution(format!(
+                            "setInputSignal({msb}, {lsb}, {index}) failed: {e}"
+                        ))
+                    })?;
             }
         }
 
-        // Get witness size
+        /*
+         * getWitnessSize() tells us how many witness elements exist.
+         */
         let get_witness_size = self
             .instance
             .get_typed_func::<(), i32>(&self.store, "getWitnessSize")
-            .map_err(|e| WasmiWitnessError::Execution(e.to_string()))?;
+            .map_err(|e| WasmiWitnessError::Instantiation(e.to_string()))?;
+
         let witness_size = get_witness_size
             .call(&mut self.store, ())
             .map_err(|e| WasmiWitnessError::Execution(e.to_string()))?
             as usize;
 
-        // Read witness elements
-        let mut witness_bigints = Vec::with_capacity(witness_size);
+        /*
+         * The generated WASM's getWitness implementation accesses:
+         *
+         *   pointer_table = 6140
+         *
+         * and resolves:
+         *
+         *   ptr = *(6140 + witness_index * 4)
+         *   c   = 6204 + ptr * 40
+         *
+         * before calling:
+         *
+         *   Fr_copy(1984, c)
+         *   Fr_toLongNormal(1984)
+         *
+         * We inspect that storage directly so we don't guess the
+         * internal Circom Fr representation.
+         */
+        for i in 0..witness_size {
+            let ptr_addr = 6140usize + i * 4;
+
+            let ptr = read_u32(&self.memory, &self.store, ptr_addr)
+                .map_err(WasmiWitnessError::MemoryRead)? as usize;
+
+            let c = 6204usize + ptr * 40;
+
+            let _storage = read_bytes(&self.memory, &self.store, c, 40)
+                .map_err(WasmiWitnessError::MemoryRead)?;
+        }
+
         let get_witness = self
             .instance
             .get_typed_func::<i32, ()>(&self.store, "getWitness")
-            .map_err(|e| WasmiWitnessError::Execution(e.to_string()))?;
-        let read_rw = self
-            .instance
-            .get_typed_func::<i32, i32>(&self.store, "readSharedRWMemory")
-            .map_err(|e| WasmiWitnessError::Execution(e.to_string()))?;
+            .map_err(|e| WasmiWitnessError::Instantiation(e.to_string()))?;
+
+        let mut witness = Vec::with_capacity(witness_size);
 
         for i in 0..witness_size {
-            get_witness
-                .call(&mut self.store, i as i32)
-                .map_err(|e| WasmiWitnessError::Execution(e.to_string()))?;
-            let mut limbs = vec![0u32; self.n32 as usize];
-            for j in 0..self.n32 as usize {
-                let val = read_rw
-                    .call(&mut self.store, j as i32)
-                    .map_err(|e| WasmiWitnessError::Execution(e.to_string()))?;
-                limbs[j] = val as u32;
-            }
-            witness_bigints.push(u32_limbs_to_bigint(&limbs));
-        }
+            get_witness.call(&mut self.store, i as i32).map_err(|e| {
+                WasmiWitnessError::Execution(format!("getWitness({i}) failed: {e}"))
+            })?;
 
-        // Convert BigInt -> Fr (mod prime)
-        let modulus = <Fr as PrimeField>::MODULUS;
-        let modulus_biguint: num_bigint::BigUint = modulus.into();
-        let witness = witness_bigints
-            .into_iter()
-            .map(|w| {
-                let w = if w.is_negative() {
-                    (&modulus_biguint - w.abs().to_biguint().unwrap())
-                } else {
-                    w.to_biguint().unwrap()
-                };
-                Fr::from(w)
-            })
-            .collect();
+            /*
+             * getWitness writes its temporary Fr object at address 1984.
+             *
+             * From the generated WAT:
+             *
+             *   Fr_copy(1984, c)
+             *   Fr_toLongNormal(1984)
+             *
+             * Fr_toLongNormal then reads a signed 32-bit value from:
+             *
+             *   1984 + 8
+             *
+             * via i64.load32_s.
+             *
+             * We therefore inspect the complete object first.
+             */
+            let _raw = read_bytes(&self.memory, &self.store, 1984, 40)
+                .map_err(WasmiWitnessError::MemoryRead)?;
+
+            /*
+             * The immediate scalar consumed by Fr_toLongNormal is at
+             * offset +8.
+             *
+             * Do not interpret the entire 40-byte object as eight
+             * independent field limbs.
+             */
+            let scalar =
+                read_i32(&self.memory, &self.store, 1992).map_err(WasmiWitnessError::MemoryRead)?;
+
+            let value = BigInt::from(scalar);
+
+            let field_element = bigint_to_fr(&value, &self.prime)?;
+
+            witness.push(field_element);
+        }
 
         Ok(witness)
     }
 
-    pub fn num_public_inputs(&self) -> usize {
+    pub fn num_public(&self) -> usize {
         self.num_public
     }
-}
 
-/// FNV hash for signal name lookup (matches Circom's FNV implementation)
-fn fnv(name: &str) -> (i32, i32) {
-    let mut hash = 0x811c9dc5u64;
-    for byte in name.as_bytes() {
-        hash ^= *byte as u64;
-        hash = hash.wrapping_mul(0x01000193);
+    pub fn prime(&self) -> &BigInt {
+        &self.prime
     }
-    let msb = (hash >> 32) as i32;
-    let lsb = hash as i32;
-    (msb, lsb)
 }
 
-/// Convert BigInt to little-endian u32 limbs (fixed width)
+/* -------------------------------------------------------------------------- */
+/* Memory helpers                                                             */
+/* -------------------------------------------------------------------------- */
+
+fn read_bytes(
+    memory: &Memory,
+    store: &Store<()>,
+    offset: usize,
+    len: usize,
+) -> Result<Vec<u8>, String> {
+    let data = memory.data(store);
+
+    let end = offset
+        .checked_add(len)
+        .ok_or_else(|| "memory offset overflow".to_string())?;
+
+    if end > data.len() {
+        return Err(format!(
+            "memory read out of bounds: offset={offset}, len={len}, memory_size={}",
+            data.len()
+        ));
+    }
+
+    Ok(data[offset..end].to_vec())
+}
+
+fn read_u32(memory: &Memory, store: &Store<()>, offset: usize) -> Result<u32, String> {
+    let bytes = read_bytes(memory, store, offset, 4)?;
+
+    Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+}
+
+fn read_i32(memory: &Memory, store: &Store<()>, offset: usize) -> Result<i32, String> {
+    Ok(read_u32(memory, store, offset)? as i32)
+}
+
+/* -------------------------------------------------------------------------- */
+/* BigInt / field helpers                                                     */
+/* -------------------------------------------------------------------------- */
+
 fn bigint_to_u32_limbs(value: &BigInt, n32: usize) -> Vec<u32> {
     let mut limbs = vec![0u32; n32];
-    let mut rem = value.clone();
-    let radix = BigInt::from(0x100000000u64);
-    let mut i = n32;
-    while !rem.is_zero() && i > 0 {
-        i -= 1;
-        limbs[i] = (&rem % &radix).to_u32().unwrap_or(0);
-        rem /= &radix;
+
+    let radix = BigInt::from(0x1_0000_0000u64);
+    let mut remainder = value.clone();
+
+    for limb in limbs.iter_mut() {
+        *limb = (&remainder % &radix).to_u32().unwrap_or(0);
+
+        remainder /= &radix;
     }
+
     limbs
 }
 
-/// Convert little-endian u32 limbs to BigInt
 fn u32_limbs_to_bigint(limbs: &[u32]) -> BigInt {
-    let mut res = BigInt::from(0);
-    let radix = BigInt::from(0x100000000u64);
+    let mut result = BigInt::zero();
+    let radix = BigInt::from(0x1_0000_0000u64);
+
     for &limb in limbs.iter().rev() {
-        res = res * &radix + BigInt::from(limb);
+        result = result * &radix + BigInt::from(limb);
     }
-    res
+
+    result
+}
+
+fn bigint_to_fr(value: &BigInt, prime: &BigInt) -> Result<Fr, WasmiWitnessError> {
+    let mut value = value.clone();
+
+    /*
+     * Circom field elements are modulo the BN254 scalar field prime.
+     */
+    value %= prime;
+
+    if value.is_negative() {
+        value += prime;
+    }
+
+    let bytes = value.to_bytes_le().1;
+
+    Ok(Fr::from_le_bytes_mod_order(&bytes))
+}
+
+/* -------------------------------------------------------------------------- */
+/* Circom FNV signal hashing                                                   */
+/* -------------------------------------------------------------------------- */
+
+fn fnv(name: &str) -> (u32, u32) {
+    /*
+     * This is the Circom witness-calculator FNV-1a implementation.
+     *
+     * Circom splits the resulting 64-bit hash into:
+     *
+     *   msb = high 32 bits
+     *   lsb = low 32 bits
+     */
+    let mut hash: u64 = 0xcbf29ce484222325;
+
+    for byte in name.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+
+    let msb = (hash >> 32) as u32;
+    let lsb = hash as u32;
+
+    (msb, lsb)
+}
+
+/* -------------------------------------------------------------------------- */
+/* Tests                                                                      */
+/* -------------------------------------------------------------------------- */
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_age_check_witness() {
+        let wasm = fs::read("../../circuits/age_check/age_check_js/age_check.wasm")
+            .expect("failed to read age_check.wasm");
+
+        let mut calculator =
+            WasmiWitnessCalculator::new(&wasm).expect("failed to create witness calculator");
+
+        let inputs = vec![
+            ("age".to_string(), vec![BigInt::from(25u32)]),
+            ("threshold".to_string(), vec![BigInt::from(18u32)]),
+        ];
+
+        let witness = calculator
+            .calculate_witness(&inputs)
+            .expect("failed to calculate witness");
+
+        println!("witness length = {}", witness.len());
+
+        for (i, value) in witness.iter().enumerate() {
+            println!("witness[{i}] = {value}");
+        }
+
+        assert_eq!(witness.len(), 15);
+
+        /*
+         * Expected Circom witness layout:
+         *
+         *   witness[0] = 1
+         *   witness[1] = threshold = 18
+         *   witness[2] = age       = 25
+         *
+         * We currently keep these assertions here because they will
+         * immediately tell us whether the internal representation
+         * decoding is correct.
+         */
+        assert_eq!(witness[0], Fr::from(1u64));
+        assert_eq!(witness[1], Fr::from(1u64));
+        assert_eq!(witness[2], Fr::from(18u64));
+        assert_eq!(witness[3], Fr::from(25u64));
+    }
 }

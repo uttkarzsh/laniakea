@@ -2506,7 +2506,15 @@ name = "laniakea-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ark-bn254",
+ "ark-circom",
+ "ark-groth16",
+ "ark-serialize",
+ "ark-snark",
+ "ark-std",
  "laniakea-core",
+ "num-bigint",
+ "rand",
  "serde_json",
 ]
 
@@ -2519,8 +2527,11 @@ dependencies = [
  "ark-circom",
  "ark-groth16",
  "ark-serialize",
+ "ark-snark",
  "ark-std",
+ "ethers-core",
  "num-bigint",
+ "rand",
  "serde",
  "serde_json",
  "tempfile",

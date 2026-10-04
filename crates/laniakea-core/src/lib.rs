@@ -5,7 +5,7 @@ pub mod error;
 pub mod witness;
 #[cfg(not(target_os = "ios"))]
 pub mod witness_ark;
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "macos"))]
 pub mod witness_wasmi;
 
 pub use backend::groth16::Groth16Backend;

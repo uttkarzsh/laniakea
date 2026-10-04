@@ -14,7 +14,7 @@ pub struct WasmiWitnessAdapter {
 impl WitnessCalculator for WasmiWitnessAdapter {
     fn new(artifacts: WitnessArtifacts) -> Result<Self, LaniakeaError> {
         // iOS path ignores R1CS
-        let inner = wasmi_witness::WasmiWitnessCalculator::new(artifacts.wasm_bytes)
+        let inner = wasmi_witness::WasmiWitnessCalculator::new(&artifacts.wasm_bytes)
             .map_err(|e| LaniakeaError::WitnessGeneration(e.to_string()))?;
         Ok(Self { inner })
     }
@@ -29,6 +29,6 @@ impl WitnessCalculator for WasmiWitnessAdapter {
     }
 
     fn num_public_inputs(&self) -> usize {
-        self.inner.num_public_inputs()
+        self.inner.num_public()
     }
 }

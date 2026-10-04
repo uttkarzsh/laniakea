@@ -5,7 +5,6 @@ use crate::{
 use ark_bn254::{Bn254, Fr};
 use ark_circom::{CircomBuilder, CircomConfig};
 use num_bigint::BigInt;
-use std::io::Write;
 
 pub struct ArkCircomWitness {
     cfg: CircomConfig<Bn254>,
