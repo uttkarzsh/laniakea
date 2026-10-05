@@ -30,4 +30,6 @@ pub trait ZkBackend {
     ) -> Result<bool, LaniakeaError>;
 }
 
+pub mod circom_reduction;
 pub mod groth16;
+pub mod prover;
