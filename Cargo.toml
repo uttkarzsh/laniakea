@@ -39,3 +39,21 @@ ethers-core      = "2.0"
 
 # FFI
 uniffi           = "0.28"
+
+# The Wasmi interpreter executes the Circom witness calculators in tests. Fully
+# unoptimised it is ~20x slower (a failing run takes ~20 ms), which makes the
+# repeated-failure regression test in wasmi-witness take over a minute.
+# Level 1 also lowers the native stack the interpreter needs: measured in the
+# tested configuration, a witness run needs 512 KiB of thread stack in the dev
+# profile without these overrides and 32 KiB with them (the same as release).
+# Level 1 is deliberate: levels 2-3 make the interpreter's failure path need
+# more than 2 MiB of native stack in the dev profile (overflowing the default
+# 2 MiB test thread). Dev/test profile only; release builds are unaffected.
+[profile.dev.package.wasmi]
+opt-level = 1
+[profile.dev.package.wasmi_core]
+opt-level = 1
+[profile.dev.package.wasmi_ir]
+opt-level = 1
+[profile.dev.package.wasmi_collections]
+opt-level = 1

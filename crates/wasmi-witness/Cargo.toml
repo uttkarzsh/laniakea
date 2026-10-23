@@ -13,3 +13,6 @@ ark-std          = { workspace = true }
 thiserror        = { workspace = true }
 bytemuck         = "1"
 num-traits       = "0.2"
+
+[dev-dependencies]
+serde_json       = { workspace = true }

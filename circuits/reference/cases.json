@@ -1,0 +1,340 @@
+[
+ {
+  "circuit": "age_check",
+  "name": "ok_25_18",
+  "inputs": {
+   "age": "25",
+   "threshold": "18"
+  }
+ },
+ {
+  "circuit": "age_check",
+  "name": "ok_10_18_zero_output",
+  "inputs": {
+   "age": "10",
+   "threshold": "18"
+  }
+ },
+ {
+  "circuit": "age_check",
+  "name": "ok_exact_threshold",
+  "inputs": {
+   "age": "18",
+   "threshold": "18"
+  }
+ },
+ {
+  "circuit": "age_check",
+  "name": "assert_age_300_exceeds_8_bits",
+  "inputs": {
+   "age": "300",
+   "threshold": "18"
+  }
+ },
+ {
+  "circuit": "age_check",
+  "name": "negative_age_wraps_to_p_minus_1",
+  "inputs": {
+   "age": "-1",
+   "threshold": "18"
+  }
+ },
+ {
+  "circuit": "age_check",
+  "name": "age_equals_p_reduces_to_0",
+  "inputs": {
+   "age": "21888242871839275222246405745257275088548364400416034343698204186575808495617",
+   "threshold": "18"
+  }
+ },
+ {
+  "circuit": "age_check",
+  "name": "age_p_plus_25_reduces_to_25",
+  "inputs": {
+   "age": "21888242871839275222246405745257275088548364400416034343698204186575808495642",
+   "threshold": "18"
+  }
+ },
+ {
+  "circuit": "age_check",
+  "name": "wide_threshold_2_pow_40",
+  "inputs": {
+   "age": "25",
+   "threshold": "1099511627776"
+  }
+ },
+ {
+  "circuit": "age_check",
+  "name": "missing_threshold",
+  "inputs": {
+   "age": "25"
+  }
+ },
+ {
+  "circuit": "age_check",
+  "name": "missing_everything",
+  "inputs": {}
+ },
+ {
+  "circuit": "age_check",
+  "name": "unknown_signal",
+  "inputs": {
+   "age": "25",
+   "threshold": "18",
+   "foo": "1"
+  }
+ },
+ {
+  "circuit": "age_check",
+  "name": "too_many_values",
+  "inputs": {
+   "age": [
+    "25",
+    "26"
+   ],
+   "threshold": "18"
+  }
+ },
+ {
+  "circuit": "witness_probe",
+  "name": "ok_basic",
+  "inputs": {
+   "a": "3",
+   "b": "5",
+   "v": [
+    "1",
+    "2",
+    "3"
+   ],
+   "flag": "1"
+  }
+ },
+ {
+  "circuit": "witness_probe",
+  "name": "ok_flag_zero",
+  "inputs": {
+   "a": "3",
+   "b": "5",
+   "v": [
+    "1",
+    "2",
+    "3"
+   ],
+   "flag": "0"
+  }
+ },
+ {
+  "circuit": "witness_probe",
+  "name": "max_field_elements",
+  "inputs": {
+   "a": "21888242871839275222246405745257275088548364400416034343698204186575808495616",
+   "b": "21888242871839275222246405745257275088548364400416034343698204186575808495616",
+   "v": [
+    "21888242871839275222246405745257275088548364400416034343698204186575808495616",
+    "21888242871839275222246405745257275088548364400416034343698204186575808495616",
+    "21888242871839275222246405745257275088548364400416034343698204186575808495616"
+   ],
+   "flag": "1"
+  }
+ },
+ {
+  "circuit": "witness_probe",
+  "name": "wide_values_above_2_pow_32",
+  "inputs": {
+   "a": "1606938044258990275541962092341162602522202993782792835313721",
+   "b": "1361129467683753853853498429727072845831",
+   "v": [
+    "4294967296",
+    "18446744073709551616",
+    "340282366920938463463374607431768211456"
+   ],
+   "flag": "1"
+  }
+ },
+ {
+  "circuit": "witness_probe",
+  "name": "boundary_2_pow_31_and_2_pow_32",
+  "inputs": {
+   "a": "2147483648",
+   "b": "4294967296",
+   "v": [
+    "2147483647",
+    "4294967295",
+    "4294967297"
+   ],
+   "flag": "0"
+  }
+ },
+ {
+  "circuit": "witness_probe",
+  "name": "negative_values_wrap",
+  "inputs": {
+   "a": "-5",
+   "b": "3",
+   "v": [
+    "-1",
+    "-2",
+    "-3"
+   ],
+   "flag": "1"
+  }
+ },
+ {
+  "circuit": "witness_probe",
+  "name": "values_above_modulus_reduce",
+  "inputs": {
+   "a": "21888242871839275222246405745257275088548364400416034343698204186575808495621",
+   "b": "43776485743678550444492811490514550177096728800832068687396408373151616991237",
+   "v": [
+    "21888242871839275222246405745257275088548364400416034343698204186575808495617",
+    "21888242871839275222246405745257275088548364400416034343698204186575808495618",
+    "21888242871839275222246405745257275088548364400416034343698204186575808495616"
+   ],
+   "flag": "1"
+  }
+ },
+ {
+  "circuit": "witness_probe",
+  "name": "assert_constraint_flag_2",
+  "inputs": {
+   "a": "3",
+   "b": "5",
+   "v": [
+    "1",
+    "2",
+    "3"
+   ],
+   "flag": "2"
+  }
+ },
+ {
+  "circuit": "witness_probe",
+  "name": "assert_constraint_flag_minus_1",
+  "inputs": {
+   "a": "3",
+   "b": "5",
+   "v": [
+    "1",
+    "2",
+    "3"
+   ],
+   "flag": "-1"
+  }
+ },
+ {
+  "circuit": "witness_probe",
+  "name": "assert_statement_b_equals_7",
+  "inputs": {
+   "a": "3",
+   "b": "7",
+   "v": [
+    "1",
+    "2",
+    "3"
+   ],
+   "flag": "1"
+  }
+ },
+ {
+  "circuit": "witness_probe",
+  "name": "array_too_few_values",
+  "inputs": {
+   "a": "3",
+   "b": "5",
+   "v": [
+    "1",
+    "2"
+   ],
+   "flag": "1"
+  }
+ },
+ {
+  "circuit": "witness_probe",
+  "name": "array_too_many_values",
+  "inputs": {
+   "a": "3",
+   "b": "5",
+   "v": [
+    "1",
+    "2",
+    "3",
+    "4"
+   ],
+   "flag": "1"
+  }
+ },
+ {
+  "circuit": "witness_probe",
+  "name": "array_given_scalar",
+  "inputs": {
+   "a": "3",
+   "b": "5",
+   "v": "1",
+   "flag": "1"
+  }
+ },
+ {
+  "circuit": "witness_probe",
+  "name": "missing_flag",
+  "inputs": {
+   "a": "3",
+   "b": "5",
+   "v": [
+    "1",
+    "2",
+    "3"
+   ]
+  }
+ },
+ {
+  "circuit": "witness_probe",
+  "name": "missing_array",
+  "inputs": {
+   "a": "3",
+   "b": "5",
+   "flag": "1"
+  }
+ },
+ {
+  "circuit": "witness_probe",
+  "name": "unknown_signal",
+  "inputs": {
+   "a": "3",
+   "b": "5",
+   "v": [
+    "1",
+    "2",
+    "3"
+   ],
+   "flag": "1",
+   "zzz": "1"
+  }
+ },
+ {
+  "circuit": "witness_probe",
+  "name": "output_signal_is_not_an_input",
+  "inputs": {
+   "a": "3",
+   "b": "5",
+   "v": [
+    "1",
+    "2",
+    "3"
+   ],
+   "flag": "1",
+   "prod": "15"
+  }
+ },
+ {
+  "circuit": "witness_probe",
+  "name": "indexed_element_name_is_not_an_input",
+  "inputs": {
+   "a": "3",
+   "b": "5",
+   "v[0]": "1",
+   "v[1]": "2",
+   "v[2]": "3",
+   "flag": "1"
+  }
+ }
+]
