@@ -20,10 +20,26 @@ use crate::error::LaniakeaError;
 ///
 /// # Returns
 /// * `Proof<Bn254>` - The Groth16 proof
+///
+/// # Validation
+/// Before any proving work, the artifact is checked with
+/// [`ProvingArtifact::validate`] and the witness with
+/// [`ProvingArtifact::validate_witness`], so inconsistent inputs produce
+/// [`LaniakeaError::InvalidArtifact`] / [`LaniakeaError::InvalidWitness`]
+/// instead of a panic, an oversized allocation, or a silently wrong proof.
+/// The artifact check is linear in the number of matrix entries, which is small
+/// next to the FFTs and multi-scalar multiplications that follow; it is
+/// repeated here because `ProvingArtifact`'s fields are public, so a value
+/// need not have come through [`ProvingArtifact::from_bytes`]. These are
+/// structural checks: they do not verify that the witness satisfies the
+/// constraints (an unsatisfying witness yields a proof that fails to verify).
 pub fn prove_with_artifact(
     artifact: &ProvingArtifact,
     witness: &[Fr],
 ) -> Result<Proof<Bn254>, LaniakeaError> {
+    artifact.validate()?;
+    artifact.validate_witness(witness)?;
+
     // Extract components from artifact
     let proving_key: &ProvingKey<Bn254> = &artifact.proving_key;
     let matrices: ConstraintMatrices<Fr> = artifact.matrices.clone().into();
@@ -31,9 +47,11 @@ pub fn prove_with_artifact(
     let num_inputs = artifact.num_public_inputs();
     let num_constraints = artifact.num_constraints();
 
-    // Note: witness length may differ from num_inputs + num_witness_vars
-    // because the zkey matrices may include variables not in the Wasmi witness
-    // (e.g., output signals). The CircomReduction only uses num_inputs and num_constraints.
+    // The witness has one entry per circuit wire (`artifact.witness_len()`,
+    // checked above), which is `num_instance_variables + l_query.len()`. Do not
+    // compare it with `num_instance_variables + num_witness_variables`:
+    // ark-circom reports `num_witness_variables` one higher than the number of
+    // auxiliary wires.
 
     // Generate random r, s for proof
     let mut rng = thread_rng();
