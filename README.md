@@ -30,7 +30,6 @@ The core Rust proving pipeline is implemented and tested. The iOS-compatible pro
 
 **Not yet complete:**
 
-- High-level Rust API (Phase 5)
 - UniFFI / Swift bindings (Phase 6)
 - Packaged iOS app with real SwiftUI flow (Phase 7)
 
@@ -214,14 +213,19 @@ examples/
 - iOS compilation + dependency isolation verified
 
 ### Phase 5 — High-level Rust proving API
-**Status: NEXT / NOT STARTED**
+**Status: COMPLETE**
 
 Goal: Clean API hiding Arkworks internals
 
 ```rust
-// Conceptual - not yet implemented
-let prover = Prover::from_artifact(artifact_bytes, wasm_bytes)?;
-let result = prover.prove(inputs)?;
+// From serialized artifact bytes (validated on construction):
+let prover = Prover::new(&artifact_bytes, &wasm_bytes)?;
+// ...or from an already-decoded ProvingArtifact:
+// let prover = Prover::from_artifact(artifact, &wasm_bytes)?;
+
+// inputs: &[(String, Vec<BigInt>)], e.g. [("age".into(), vec![25.into()]), ...]
+let result = prover.prove(&inputs)?;
+// result.public_signals: decimal strings, e.g. ["1", "18"]; check `out` yourself
 ```
 
 ### Phase 6 — UniFFI / Swift integration

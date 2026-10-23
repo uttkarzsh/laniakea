@@ -8,12 +8,10 @@ use std::str::FromStr;
 use super::{ProofOutput, ProvingArtifacts, WitnessInputs, ZkBackend};
 use crate::error::LaniakeaError;
 
-#[cfg(not(target_os = "ios"))]
-use crate::witness_ark::ArkCircomWitness;
-
-/// Platform-independent Groth16 backend.
-/// - On desktop: full proving + verification (requires ark-circom for zkey parsing)
-/// - On iOS: verification only (pure ark-groth16, no ark-circom/Wasmer)
+/// Legacy trait-based Groth16 backend. New code should use [`crate::Prover`].
+/// - `verify`: pure ark-groth16, all platforms.
+/// - `prove`: a convenience wrapper over [`crate::Prover`] for callers holding a
+///   raw `.zkey` (desktop only, since parsing it needs ark-circom).
 pub struct Groth16Backend;
 
 impl ZkBackend for Groth16Backend {
@@ -23,71 +21,16 @@ impl ZkBackend for Groth16Backend {
         artifacts: &ProvingArtifacts,
         inputs: &WitnessInputs,
     ) -> Result<ProofOutput, LaniakeaError> {
-        // Desktop path: uses ark-circom for zkey parsing and CircomReduction
-        use crate::witness::{WitnessArtifacts, WitnessCalculator};
-        use ark_circom::{ethereum::Proof as EthProof, CircomReduction};
-        use ark_std::UniformRand;
-        use rand::thread_rng;
-        use serde_json::json;
-
-        // Load zkey → ProvingKey + R1CS matrices (ConstraintMatrices<Fr>)
-        let (proving_key, matrices) =
-            ark_circom::read_zkey(&mut Cursor::new(&artifacts.zkey_bytes))
-                .map_err(|e| LaniakeaError::ArtifactLoad(e.to_string()))?;
-
-        // Build witness calculator
-        let r1cs_bytes = std::fs::read("circuits/age_check/age_check.r1cs")
-            .map_err(|e| LaniakeaError::ArtifactLoad(e.to_string()))?;
-        let mut witness_calc = <ArkCircomWitness as WitnessCalculator>::new(WitnessArtifacts {
-            wasm_bytes: artifacts.wasm_bytes.clone(),
-            r1cs_bytes: Some(r1cs_bytes),
-        })?;
-
-        // Calculate full witness: [1, public_inputs..., private_wires...]
-        let full_witness: Vec<Fr> = witness_calc.calculate_witness(inputs)?;
-
-        // Groth16 proving requires:
-        // - ProvingKey (from zkey)
-        // - R1CS matrices (from zkey)
-        // - num_instance_variables (public inputs count including "1")
-        // - num_constraints
-        // - full witness assignment (Fr vector)
-        let num_inputs = matrices.num_instance_variables;
-        let num_constraints = matrices.num_constraints;
-
-        // Generate random r, s for proof
-        let mut rng = thread_rng();
-        let r = Fr::rand(&mut rng);
-        let s = Fr::rand(&mut rng);
-
-        // Create proof using CircomReduction (handles Circom's QAP transformation)
-        let proof = Groth16::<Bn254, CircomReduction>::create_proof_with_reduction_and_matrices(
-            &proving_key,
-            r,
-            s,
-            &matrices,
-            num_inputs,
-            num_constraints,
-            full_witness.as_slice(),
-        )
-        .map_err(|e| LaniakeaError::ProofGeneration(e.to_string()))?;
-
-        // Serialize proof to JSON
-        let eth_proof: EthProof = proof.into();
-        let proof_json = eth_proof_to_json(&eth_proof)
-            .map_err(|e| LaniakeaError::Serialization(e.to_string()))?;
-
-        // Public signals are witness[1..num_inputs] (excluding the leading "1")
-        let public_signals = &full_witness[1..num_inputs];
-        let public_signals_json = json!(public_signals
-            .iter()
-            .map(|fr| fr.to_string())
-            .collect::<Vec<_>>())
-        .to_string();
-
+        // Same validated pipeline as `Prover`: zkey -> ProvingArtifact (validated),
+        // Wasmi witness, portable CircomReduction. No filesystem access, no
+        // ark-circom witness engine. Output formats follow `ProofResult`.
+        let artifact = crate::artifacts::parse_zkey_to_artifact(&artifacts.zkey_bytes)
+            .map_err(LaniakeaError::ArtifactLoad)?;
+        let result =
+            crate::Prover::from_artifact(artifact, &artifacts.wasm_bytes)?.prove(inputs)?;
         Ok(ProofOutput {
-            proof_json,
-            public_signals_json,
+            proof_json: result.proof_json(),
+            public_signals_json: result.public_signals_json(),
         })
     }
 
@@ -98,7 +41,8 @@ impl ZkBackend for Groth16Backend {
         _inputs: &WitnessInputs,
     ) -> Result<ProofOutput, LaniakeaError> {
         Err(LaniakeaError::ProofGeneration(
-            "Proving not supported on iOS. Use desktop for proving, iOS for verification only."
+            "a raw .zkey cannot be parsed on iOS (ark-circom is desktop-only). \
+             Convert it to a ProvingArtifact at build time and use laniakea_core::Prover."
                 .into(),
         ))
     }
@@ -257,18 +201,4 @@ fn parse_g2_affine(value: &serde_json::Value) -> Result<G2Affine, LaniakeaError>
     let y_fq2 = ark_bn254::Fq2::new(y0, y1);
 
     Ok(G2Affine::new_unchecked(x_fq2, y_fq2))
-}
-
-/// Desktop-only helper: convert EthProof to JSON string (for compatibility with existing desktop code)
-#[cfg(not(target_os = "ios"))]
-fn eth_proof_to_json(proof: &ark_circom::ethereum::Proof) -> Result<String, serde_json::Error> {
-    use serde_json::json;
-    let a = proof.a.as_tuple();
-    let b = proof.b.as_tuple();
-    let c = proof.c.as_tuple();
-    serde_json::to_string(&json!({
-        "a": [a.0.to_string(), a.1.to_string()],
-        "b": [[b.0[0].to_string(), b.0[1].to_string()], [b.1[0].to_string(), b.1[1].to_string()]],
-        "c": [c.0.to_string(), c.1.to_string()],
-    }))
 }

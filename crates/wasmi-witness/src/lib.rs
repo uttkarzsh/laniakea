@@ -228,7 +228,9 @@ impl WasmiWitnessCalculator {
     /// compiled in [`Self::new`], runs on it, and drops it, whether the run
     /// succeeded or failed. Linear memory, the module's internal stack and the
     /// host-side error state are therefore never carried from one call to the
-    /// next; a trap or aborted run cannot affect a later call. The cost is one
+    /// next; a trap or aborted run cannot affect a later call. Because nothing
+    /// mutable is shared, this takes `&self` and the calculator may be used
+    /// from several threads at once (it is `Send + Sync`). The cost is one
     /// instantiation per call, which allocates and zero-fills the module's
     /// initial linear memory (704 KiB for the circuits in this repository).
     ///
@@ -238,7 +240,7 @@ impl WasmiWitnessCalculator {
     /// lazily the first time it executes and caches the result in the shared
     /// engine. That cache affects speed only, not results.
     pub fn calculate_witness(
-        &mut self,
+        &self,
         inputs: &[(String, Vec<BigInt>)],
     ) -> Result<Vec<Fr>, WasmiWitnessError> {
         self.run_fresh(inputs).0
@@ -612,7 +614,7 @@ mod tests {
         let wasm = fs::read("../../circuits/age_check/age_check_js/age_check.wasm")
             .expect("failed to read age_check.wasm");
 
-        let mut calculator =
+        let calculator =
             WasmiWitnessCalculator::new(&wasm).expect("failed to create witness calculator");
 
         let inputs = vec![
@@ -737,7 +739,7 @@ mod tests {
         assert_eq!(live_stores(), 0);
 
         // Success, circuit abort, validation failures: none may retain a store.
-        let mut calc = calc;
+        let calc = calc;
         for _ in 0..25 {
             calc.calculate_witness(&age_check_inputs(25)).unwrap();
             assert!(calc.calculate_witness(&age_check_inputs(300)).is_err());
@@ -795,7 +797,7 @@ mod tests {
     #[test]
     fn stub_module_works_when_nothing_traps() {
         let wasm = stub_module("", WITNESS_ZERO);
-        let mut calc = WasmiWitnessCalculator::new(&wasm).unwrap();
+        let calc = WasmiWitnessCalculator::new(&wasm).unwrap();
         assert_eq!(
             calc.calculate_witness(&x_input()).unwrap(),
             vec![Fr::from(0u64); 3]
@@ -809,7 +811,7 @@ mod tests {
         let get_witness =
             format!("local.get 0 i32.const 1 i32.eq if unreachable end {WITNESS_ZERO}");
         let wasm = stub_module("", &get_witness);
-        let mut calc = WasmiWitnessCalculator::new(&wasm).unwrap();
+        let calc = WasmiWitnessCalculator::new(&wasm).unwrap();
 
         let err = calc.calculate_witness(&x_input()).unwrap_err();
         assert!(
@@ -830,7 +832,7 @@ mod tests {
         // exception code 1, as the Circom-generated setInputSignal does for a
         // name it does not know. The host must surface that, not swallow it.
         let wasm = stub_module("i32.const 1 call $eh", WITNESS_ZERO);
-        let mut calc = WasmiWitnessCalculator::new(&wasm).unwrap();
+        let calc = WasmiWitnessCalculator::new(&wasm).unwrap();
         let err = calc.calculate_witness(&x_input()).unwrap_err();
         assert!(
             matches!(

@@ -295,25 +295,39 @@ impl ProvingArtifact {
     ///
     /// This does not check that the witness *satisfies* the constraints.
     pub fn validate_witness(&self, witness: &[Fr]) -> Result<(), LaniakeaError> {
-        let expected = self.witness_len();
-        if witness.len() != expected {
-            return Err(LaniakeaError::InvalidWitness(format!(
-                "witness has {} entries but this proving artifact expects {expected} \
-                 (one per circuit wire, constant 1 included: {} instance + {} auxiliary)",
-                witness.len(),
-                self.matrices.num_instance_variables,
-                self.proving_key.l_query.len()
-            )));
-        }
-        // `first()`, not indexing: this method must not panic even on an
-        // artifact that was never validated and has no wires.
-        if witness.first() != Some(&Fr::one()) {
-            return Err(LaniakeaError::InvalidWitness(
-                "witness[0] must be the constant 1".into(),
-            ));
-        }
-        Ok(())
+        check_witness_shape(
+            witness,
+            self.witness_len(),
+            self.matrices.num_instance_variables,
+        )
     }
+}
+
+/// The witness checks of [`ProvingArtifact::validate_witness`], on plain
+/// numbers so that [`crate::Prover`] can apply them without retaining a second
+/// copy of the artifact. `expected_len` is the wire count; `n_inst` the number
+/// of instance variables (for the error message).
+pub(crate) fn check_witness_shape(
+    witness: &[Fr],
+    expected_len: usize,
+    n_inst: usize,
+) -> Result<(), LaniakeaError> {
+    if witness.len() != expected_len {
+        return Err(LaniakeaError::InvalidWitness(format!(
+            "witness has {} entries but this proving artifact expects {expected_len} \
+             (one per circuit wire, constant 1 included: {n_inst} instance + {} auxiliary)",
+            witness.len(),
+            expected_len.saturating_sub(n_inst)
+        )));
+    }
+    // `first()`, not indexing: this must not panic even for an artifact that
+    // was never validated and has no wires.
+    if witness.first() != Some(&Fr::one()) {
+        return Err(LaniakeaError::InvalidWitness(
+            "witness[0] must be the constant 1".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Desktop-only: convert a `.zkey` file into a `ProvingArtifact`.

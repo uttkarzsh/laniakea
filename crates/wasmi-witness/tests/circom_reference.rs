@@ -64,7 +64,7 @@ fn matches_circom_js_calculator_on_every_reference_case() {
     for case in &cases {
         let circuit = case["circuit"].as_str().unwrap();
         let name = case["name"].as_str().unwrap();
-        let mut calc = calculator(circuit);
+        let calc = calculator(circuit);
         let result = calc.calculate_witness(&to_inputs(&case["inputs"]));
 
         if let Some(expected) = case.get("witness") {
@@ -102,7 +102,7 @@ fn matches_circom_js_calculator_on_every_reference_case() {
 #[test]
 fn large_values_use_all_limbs() {
     // 2^200 + 12345 only survives if all eight 32-bit limbs are decoded.
-    let mut calc = calculator("witness_probe");
+    let calc = calculator("witness_probe");
     let a: BigInt = (BigInt::from(1u8) << 200usize) + 12345;
     let b: BigInt = (BigInt::from(1u8) << 130usize) + 7;
     let w = calc
@@ -123,7 +123,7 @@ fn large_values_use_all_limbs() {
 
 #[test]
 fn negative_inputs_wrap_modulo_p() {
-    let mut calc = calculator("witness_probe");
+    let calc = calculator("witness_probe");
     let w = calc
         .calculate_witness(&[
             ("a".into(), vec![BigInt::from(-5)]),
@@ -139,7 +139,7 @@ fn negative_inputs_wrap_modulo_p() {
 #[test]
 fn age_check_negative_age_is_p_minus_one_not_zero() {
     // Regression for the audit finding: -1 used to be written as 0.
-    let mut calc = calculator("age_check");
+    let calc = calculator("age_check");
     let w = calc
         .calculate_witness(&[
             ("age".into(), vec![BigInt::from(-1)]),
@@ -153,7 +153,7 @@ fn age_check_negative_age_is_p_minus_one_not_zero() {
 fn witness_probe_values_above_u32_range_round_trip() {
     // Regression for the audit finding: 2^40 used to read back as 0. age_check
     // rejects such values (8-bit comparison), so this uses witness_probe.
-    let mut calc = calculator("witness_probe");
+    let calc = calculator("witness_probe");
     let big_value = BigInt::from(1u64 << 40);
     let w = calc
         .calculate_witness(&[
@@ -170,7 +170,7 @@ fn witness_probe_values_above_u32_range_round_trip() {
 fn failed_assertion_is_an_error_not_a_witness() {
     // age = 300 does not fit the 8-bit comparison; the old code returned Ok
     // with output 0 and garbage intermediate wires.
-    let mut calc = calculator("age_check");
+    let calc = calculator("age_check");
     let err = calc
         .calculate_witness(&[
             ("age".into(), vec![BigInt::from(300)]),
@@ -193,7 +193,7 @@ fn failed_assertion_is_an_error_not_a_witness() {
 
 #[test]
 fn explicit_assert_statement_is_an_error() {
-    let mut calc = calculator("witness_probe");
+    let calc = calculator("witness_probe");
     let err = calc
         .calculate_witness(&[
             ("a".into(), vec![3.into()]),
@@ -211,7 +211,7 @@ fn explicit_assert_statement_is_an_error() {
 #[test]
 fn zero_output_is_a_valid_witness() {
     // age < threshold is a legitimate execution: out = 0, no error.
-    let mut calc = calculator("age_check");
+    let calc = calculator("age_check");
     let w = calc
         .calculate_witness(&[
             ("age".into(), vec![10.into()]),
@@ -223,7 +223,7 @@ fn zero_output_is_a_valid_witness() {
 
 #[test]
 fn input_validation_errors_are_specific() {
-    let mut calc = calculator("witness_probe");
+    let calc = calculator("witness_probe");
     let good = |extra: Vec<(String, Vec<BigInt>)>| {
         let mut v = vec![
             ("a".to_string(), vec![BigInt::from(3)]),
@@ -309,14 +309,14 @@ fn input_validation_errors_are_specific() {
 
 #[test]
 fn calculator_is_reusable_after_a_failure() {
-    let mut calc = calculator("age_check");
-    let ok = |c: &mut WasmiWitnessCalculator| {
+    let calc = calculator("age_check");
+    let ok = |c: &WasmiWitnessCalculator| {
         c.calculate_witness(&[
             ("age".into(), vec![25.into()]),
             ("threshold".into(), vec![18.into()]),
         ])
     };
-    let first = ok(&mut calc).unwrap();
+    let first = ok(&calc).unwrap();
     // A trap in the middle of execution...
     assert!(calc
         .calculate_witness(&[
@@ -326,14 +326,14 @@ fn calculator_is_reusable_after_a_failure() {
         .is_err());
     // ...and a validation failure must not poison later runs.
     assert!(calc.calculate_witness(&[]).is_err());
-    assert_eq!(ok(&mut calc).unwrap(), first);
+    assert_eq!(ok(&calc).unwrap(), first);
 }
 
 #[test]
 fn calculator_recovers_after_partial_input_failures() {
     // Failures that stop part-way through assigning inputs (some values already
     // written to the module) must not affect the next call.
-    let mut calc = calculator("witness_probe");
+    let calc = calculator("witness_probe");
     let inputs = |a: i64, v: &[i64], flag: Option<i64>| {
         let mut i: Vec<(String, Vec<BigInt>)> = vec![
             ("a".into(), vec![a.into()]),

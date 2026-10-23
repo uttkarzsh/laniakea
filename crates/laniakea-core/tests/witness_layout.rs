@@ -85,7 +85,7 @@ fn public_inputs_are_outputs_then_public_inputs() {
 
     // age_check: out (public output) then threshold (public input).
     let wasm = fs::read(format!("{ROOT}/age_check/age_check_js/age_check.wasm")).unwrap();
-    let mut calc = WasmiWitnessCalculator::new(&wasm).unwrap();
+    let calc = WasmiWitnessCalculator::new(&wasm).unwrap();
     let w = calc
         .calculate_witness(&inputs(&[("age", &[25]), ("threshold", &[18])]))
         .unwrap();
@@ -99,7 +99,7 @@ fn public_inputs_are_outputs_then_public_inputs() {
         "{ROOT}/witness_probe/witness_probe_js/witness_probe.wasm"
     ))
     .unwrap();
-    let mut calc = WasmiWitnessCalculator::new(&wasm).unwrap();
+    let calc = WasmiWitnessCalculator::new(&wasm).unwrap();
     let w = calc
         .calculate_witness(&inputs(&[
             ("a", &[6]),

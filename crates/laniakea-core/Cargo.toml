@@ -21,17 +21,12 @@ serde_json    = { workspace = true }
 rand          = { workspace = true }
 ethers-core   = { workspace = true }
 
-# Desktop-only: ark-circom for witness gen + zkey/R1CS parsing
+# Portable witness generation (Wasmi interpreter, pure Rust). Used on every
+# platform, including iOS: this is the only witness engine the Prover uses.
+wasmi-witness = { path = "../wasmi-witness" }
+
+# Desktop-only: ark-circom for zkey/R1CS parsing and the reference witness engine.
+# Never part of the iOS dependency graph.
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 ark-circom    = { workspace = true }
-tempfile      = "3"
-
-# iOS-only: wasmi-witness for witness generation
-[target.'cfg(target_os = "ios")'.dependencies]
-wasmi-witness = { path = "../wasmi-witness" }
-
-# macOS can use either (dev convenience)
-[target.'cfg(target_os = "macos")'.dependencies]
-ark-circom    = { workspace = true }
-wasmi-witness = { path = "../wasmi-witness" }
 tempfile      = "3"

@@ -40,18 +40,28 @@ pub fn prove_with_artifact(
     artifact.validate()?;
     artifact.validate_witness(witness)?;
 
-    // Extract components from artifact
-    let proving_key: &ProvingKey<Bn254> = &artifact.proving_key;
     let matrices: ConstraintMatrices<Fr> = artifact.matrices.clone().into();
+    prove_validated(&artifact.proving_key, &matrices, witness)
+}
 
-    let num_inputs = artifact.num_public_inputs();
-    let num_constraints = artifact.num_constraints();
-
-    // The witness has one entry per circuit wire (`artifact.witness_len()`,
-    // checked above), which is `num_instance_variables + l_query.len()`. Do not
-    // compare it with `num_instance_variables + num_witness_variables`:
-    // ark-circom reports `num_witness_variables` one higher than the number of
-    // auxiliary wires.
+/// The proving step shared by [`prove_with_artifact`] and the high-level
+/// [`crate::Prover`], with no validation of its own.
+///
+/// Crate-private on purpose: callers must already have established everything
+/// [`ProvingArtifact::validate`] and [`ProvingArtifact::validate_witness`] check
+/// (the key and matrices are consistent and `witness` fits them). Called with
+/// anything else it can index out of bounds or return a wrong proof. The
+/// `Prover` runs `validate` once at construction and `validate_witness` on every
+/// call; there is deliberately no public unchecked entry point.
+pub(crate) fn prove_validated(
+    proving_key: &ProvingKey<Bn254>,
+    matrices: &ConstraintMatrices<Fr>,
+    witness: &[Fr],
+) -> Result<Proof<Bn254>, LaniakeaError> {
+    // The witness has one entry per circuit wire (`a_query.len()`), which is
+    // `num_instance_variables + l_query.len()`. Do not compare it with
+    // `num_instance_variables + num_witness_variables`: ark-circom reports
+    // `num_witness_variables` one higher than the number of auxiliary wires.
 
     // Generate random r, s for proof
     let mut rng = thread_rng();
@@ -59,18 +69,16 @@ pub fn prove_with_artifact(
     let s = Fr::rand(&mut rng);
 
     // Create proof using CircomReduction (handles Circom's QAP transformation)
-    let proof = Groth16::<Bn254, CircomReduction>::create_proof_with_reduction_and_matrices(
+    Groth16::<Bn254, CircomReduction>::create_proof_with_reduction_and_matrices(
         proving_key,
         r,
         s,
-        &matrices,
-        num_inputs,
-        num_constraints,
+        matrices,
+        matrices.num_instance_variables,
+        matrices.num_constraints,
         witness,
     )
-    .map_err(|e| LaniakeaError::ProofGeneration(e.to_string()))?;
-
-    Ok(proof)
+    .map_err(|e| LaniakeaError::ProofGeneration(e.to_string()))
 }
 
 /// Serialize a Groth16 proof to JSON (snarkjs-compatible format).
