@@ -1,0 +1,16 @@
+[package]
+name = "uniffi-bindgen"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Host-only tool that generates Swift bindings. It must never be a dependency
+# of laniakea-uniffi or anything built for iOS: the `cli` feature pulls in clap,
+# askama, goblin and friends.
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/main.rs"
+
+[dependencies]
+uniffi = { workspace = true, features = ["cli"] }

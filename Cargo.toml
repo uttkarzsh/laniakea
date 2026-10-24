@@ -6,6 +6,7 @@ members = [
     "crates/laniakea-core",
     "crates/laniakea-cli",
     "crates/laniakea-uniffi",
+    "crates/uniffi-bindgen",
     "crates/wasmi-witness",
 ]
 resolver = "2"
