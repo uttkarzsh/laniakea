@@ -32,4 +32,5 @@ pub trait ZkBackend {
 
 pub mod circom_reduction;
 pub mod groth16;
+pub(crate) mod points;
 pub mod prover;

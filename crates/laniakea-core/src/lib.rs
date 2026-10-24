@@ -15,5 +15,5 @@ pub use artifacts::parse_zkey_to_artifact;
 pub use artifacts::ProvingArtifact;
 pub use backend::groth16::Groth16Backend;
 pub use backend::{ProofOutput, ProvingArtifacts, WitnessInputs, ZkBackend};
-pub use error::LaniakeaError;
+pub use error::{CircuitLoadError, LaniakeaError, PointFault, WitnessError};
 pub use witness::{WitnessArtifacts, WitnessCalculator};

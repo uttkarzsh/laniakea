@@ -3,8 +3,8 @@ use ark_groth16::Groth16;
 use ark_serialize::CanonicalDeserialize;
 use ark_snark::SNARK;
 use ark_std::io::Cursor;
-use std::str::FromStr;
 
+use super::points;
 use super::{ProofOutput, ProvingArtifacts, WitnessInputs, ZkBackend};
 use crate::error::LaniakeaError;
 
@@ -67,8 +67,8 @@ impl ZkBackend for Groth16Backend {
         let public_signals: Vec<Fr> = public_signal_strings
             .iter()
             .map(|s| {
-                Fr::from_str(s)
-                    .map_err(|_| LaniakeaError::Serialization("invalid field element".into()))
+                points::canonical_field::<Fr>(s)
+                    .ok_or_else(|| LaniakeaError::Serialization("invalid field element".into()))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -84,7 +84,8 @@ impl ZkBackend for Groth16Backend {
     }
 }
 
-/// Parse proof from JSON directly to ark_groth16::Proof (supports both snarkjs and internal formats)
+/// Parse proof from JSON directly to ark_groth16::Proof (supports both snarkjs and internal formats).
+/// Every point is validated (on-curve, subgroup) before it can reach a pairing.
 fn proof_from_json(json_str: &str) -> Result<ark_groth16::Proof<Bn254>, LaniakeaError> {
     let value: serde_json::Value =
         serde_json::from_str(json_str).map_err(|e| LaniakeaError::Serialization(e.to_string()))?;
@@ -103,102 +104,57 @@ fn proof_from_json(json_str: &str) -> Result<ark_groth16::Proof<Bn254>, Laniakea
         .or_else(|| value.get("pi_c"))
         .ok_or_else(|| LaniakeaError::Serialization("missing 'c'/'pi_c' in proof".into()))?;
 
-    let a = parse_g1_affine(a_val)?;
-    let b = parse_g2_affine(b_val)?;
-    let c = parse_g1_affine(c_val)?;
+    let a = parse_g1_affine(a_val, "proof.a")?;
+    let b = parse_g2_affine(b_val, "proof.b")?;
+    let c = parse_g1_affine(c_val, "proof.c")?;
 
     Ok(ark_groth16::Proof { a, b, c })
 }
 
-fn parse_g1_affine(value: &serde_json::Value) -> Result<G1Affine, LaniakeaError> {
-    let arr = value
-        .as_array()
-        .ok_or_else(|| LaniakeaError::Serialization("invalid G1 tuple".into()))?;
-    // Handle both internal format [x, y] (2 elements) and snarkjs format [x, y, z] (3 elements with projective coord)
-    let (x_str, y_str) = if arr.len() == 2 {
-        let x = arr[0]
-            .as_str()
-            .ok_or_else(|| LaniakeaError::Serialization("G1 x must be string".into()))?;
-        let y = arr[1]
-            .as_str()
-            .ok_or_else(|| LaniakeaError::Serialization("G1 y must be string".into()))?;
-        (x, y)
-    } else if arr.len() == 3 {
-        let x = arr[0]
-            .as_str()
-            .ok_or_else(|| LaniakeaError::Serialization("G1 x must be string".into()))?;
-        let y = arr[1]
-            .as_str()
-            .ok_or_else(|| LaniakeaError::Serialization("G1 y must be string".into()))?;
-        (x, y)
-    } else {
-        return Err(LaniakeaError::Serialization(
-            "G1 tuple must have 2 or 3 elements".into(),
-        ));
-    };
-    let x = ark_bn254::Fq::from_str(x_str)
-        .map_err(|e| LaniakeaError::Serialization(format!("{:?}", e)))?;
-    let y = ark_bn254::Fq::from_str(y_str)
-        .map_err(|e| LaniakeaError::Serialization(format!("{:?}", e)))?;
-
-    Ok(G1Affine::new_unchecked(x, y))
+/// Accepts `[x, y]` or snarkjs's `[x, y, z]` (with `z == 1`). The point is
+/// validated: on the curve and in the right subgroup.
+fn parse_g1_affine(value: &serde_json::Value, what: &str) -> Result<G1Affine, LaniakeaError> {
+    let bad = |m: &str| LaniakeaError::Serialization(format!("{what}: {m}"));
+    let arr = value.as_array().ok_or_else(|| bad("G1 must be an array"))?;
+    if arr.len() != 2 && arr.len() != 3 {
+        return Err(bad("G1 tuple must have 2 or 3 elements"));
+    }
+    if let Some(z) = arr.get(2) {
+        points::check_z_is_one(z, false, what)?;
+    }
+    let x = arr[0]
+        .as_str()
+        .ok_or_else(|| bad("G1 x must be a string"))?;
+    let y = arr[1]
+        .as_str()
+        .ok_or_else(|| bad("G1 y must be a string"))?;
+    points::g1_from_decimals(x, y, what)
 }
 
-fn parse_g2_affine(value: &serde_json::Value) -> Result<G2Affine, LaniakeaError> {
-    let arr = value
-        .as_array()
-        .ok_or_else(|| LaniakeaError::Serialization("invalid G2 tuple".into()))?;
-    // Handle both internal format [x, y] (2 elements) and snarkjs format [x, y, z] (3 elements with projective coord)
-    let (x_arr, y_arr) = if arr.len() == 2 {
-        let x = arr[0]
-            .as_array()
-            .ok_or_else(|| LaniakeaError::Serialization("G2 x must be array".into()))?;
-        let y = arr[1]
-            .as_array()
-            .ok_or_else(|| LaniakeaError::Serialization("G2 y must be array".into()))?;
-        (x, y)
-    } else if arr.len() == 3 {
-        let x = arr[0]
-            .as_array()
-            .ok_or_else(|| LaniakeaError::Serialization("G2 x must be array".into()))?;
-        let y = arr[1]
-            .as_array()
-            .ok_or_else(|| LaniakeaError::Serialization("G2 y must be array".into()))?;
-        (x, y)
-    } else {
-        return Err(LaniakeaError::Serialization(
-            "G2 tuple must have 2 or 3 elements".into(),
-        ));
-    };
-    if x_arr.len() != 2 || y_arr.len() != 2 {
-        return Err(LaniakeaError::Serialization(
-            "G2 x/y must have 2 elements".into(),
-        ));
+/// Accepts `[x, y]` or snarkjs's `[x, y, z]` (with `z == ["1","0"]`), `x` and
+/// `y` being `[c0, c1]`. The point is validated: on the curve and in the
+/// prime-order subgroup.
+fn parse_g2_affine(value: &serde_json::Value, what: &str) -> Result<G2Affine, LaniakeaError> {
+    let bad = |m: &str| LaniakeaError::Serialization(format!("{what}: {m}"));
+    let arr = value.as_array().ok_or_else(|| bad("G2 must be an array"))?;
+    if arr.len() != 2 && arr.len() != 3 {
+        return Err(bad("G2 tuple must have 2 or 3 elements"));
     }
-    let x0_str = x_arr[0]
-        .as_str()
-        .ok_or_else(|| LaniakeaError::Serialization("G2 x[0] must be string".into()))?;
-    let x1_str = x_arr[1]
-        .as_str()
-        .ok_or_else(|| LaniakeaError::Serialization("G2 x[1] must be string".into()))?;
-    let y0_str = y_arr[0]
-        .as_str()
-        .ok_or_else(|| LaniakeaError::Serialization("G2 y[0] must be string".into()))?;
-    let y1_str = y_arr[1]
-        .as_str()
-        .ok_or_else(|| LaniakeaError::Serialization("G2 y[1] must be string".into()))?;
-
-    let x0 = ark_bn254::Fq::from_str(x0_str)
-        .map_err(|e| LaniakeaError::Serialization(format!("{:?}", e)))?;
-    let x1 = ark_bn254::Fq::from_str(x1_str)
-        .map_err(|e| LaniakeaError::Serialization(format!("{:?}", e)))?;
-    let y0 = ark_bn254::Fq::from_str(y0_str)
-        .map_err(|e| LaniakeaError::Serialization(format!("{:?}", e)))?;
-    let y1 = ark_bn254::Fq::from_str(y1_str)
-        .map_err(|e| LaniakeaError::Serialization(format!("{:?}", e)))?;
-
-    let x_fq2 = ark_bn254::Fq2::new(x0, x1);
-    let y_fq2 = ark_bn254::Fq2::new(y0, y1);
-
-    Ok(G2Affine::new_unchecked(x_fq2, y_fq2))
+    if let Some(z) = arr.get(2) {
+        points::check_z_is_one(z, true, what)?;
+    }
+    let pair = |v: &serde_json::Value| -> Result<[String; 2], LaniakeaError> {
+        let a = v
+            .as_array()
+            .filter(|a| a.len() == 2)
+            .ok_or_else(|| bad("G2 coordinates must be [c0, c1] arrays"))?;
+        let s = |i: usize| {
+            a[i].as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| bad("G2 coordinate components must be strings"))
+        };
+        Ok([s(0)?, s(1)?])
+    };
+    let (x, y) = (pair(&arr[0])?, pair(&arr[1])?);
+    points::g2_from_decimals([&x[0], &x[1]], [&y[0], &y[1]], what)
 }

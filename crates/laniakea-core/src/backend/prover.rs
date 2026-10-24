@@ -1,12 +1,12 @@
-use ark_bn254::{Bn254, Fq, Fq2, Fr, G1Affine, G2Affine};
+use ark_bn254::{Bn254, Fr, G1Affine, G2Affine};
 use ark_groth16::{Groth16, Proof, ProvingKey, VerifyingKey};
 use ark_relations::r1cs::ConstraintMatrices;
 use ark_std::UniformRand;
 use rand::thread_rng;
-use std::str::FromStr;
 
 use crate::artifacts::ProvingArtifact;
 use crate::backend::circom_reduction::CircomReduction;
+use crate::backend::points;
 use crate::error::LaniakeaError;
 
 /// Generate a Groth16 proof using the portable CircomReduction.
@@ -96,36 +96,56 @@ pub fn proof_to_json(proof: &Proof<Bn254>) -> Result<String, serde_json::Error> 
 
 /// Extract public signals from witness.
 /// The witness layout is: [1, public_inputs..., private_wires...]
-/// Public signals are witness[1..num_inputs] (excluding the leading "1")
-pub fn extract_public_signals(witness: &[Fr], num_public_inputs: usize) -> Vec<Fr> {
-    // num_public_inputs includes the constant "1" at index 0
-    witness[1..num_public_inputs].to_vec()
+/// Public signals are `witness[1..num_instance]`, excluding the leading "1";
+/// `num_instance` counts that constant.
+///
+/// Crate-private: callers outside the crate use [`crate::Prover`]. Still
+/// returns an error rather than indexing out of bounds.
+pub(crate) fn extract_public_signals(
+    witness: &[Fr],
+    num_instance: usize,
+) -> Result<Vec<Fr>, LaniakeaError> {
+    if num_instance == 0 {
+        return Err(LaniakeaError::InvalidWitness(
+            "an instance of zero variables has no constant 1".into(),
+        ));
+    }
+    witness
+        .get(1..num_instance)
+        .map(<[Fr]>::to_vec)
+        .ok_or_else(|| {
+            LaniakeaError::InvalidWitness(format!(
+                "witness has {} entries but {num_instance} instance variables are expected",
+                witness.len()
+            ))
+        })
 }
 
-/// Parse a snarkjs-format verification_key.json into ark_groth16::VerifyingKey<Bn254>
+/// Parse a snarkjs-format verification_key.json into ark_groth16::VerifyingKey<Bn254>.
+/// Every point is validated (on-curve, subgroup); an invalid one is an error.
 pub fn parse_vk_from_json(json_str: &str) -> Result<VerifyingKey<Bn254>, LaniakeaError> {
     let value: serde_json::Value =
         serde_json::from_str(json_str).map_err(|e| LaniakeaError::Serialization(e.to_string()))?;
 
     // Parse alpha_1 (G1)
-    let alpha_1 = parse_g1_affine_from_json(&value["vk_alpha_1"])?;
+    let alpha_1 = parse_g1_affine_from_json(&value["vk_alpha_1"], "vk.alpha_1")?;
 
     // Parse beta_2 (G2)
-    let beta_2 = parse_g2_affine_from_json(&value["vk_beta_2"])?;
+    let beta_2 = parse_g2_affine_from_json(&value["vk_beta_2"], "vk.beta_2")?;
 
     // Parse gamma_2 (G2)
-    let gamma_2 = parse_g2_affine_from_json(&value["vk_gamma_2"])?;
+    let gamma_2 = parse_g2_affine_from_json(&value["vk_gamma_2"], "vk.gamma_2")?;
 
     // Parse delta_2 (G2)
-    let delta_2 = parse_g2_affine_from_json(&value["vk_delta_2"])?;
+    let delta_2 = parse_g2_affine_from_json(&value["vk_delta_2"], "vk.delta_2")?;
 
     // Parse IC (Vec<G1>)
     let ic_arr = value["IC"]
         .as_array()
         .ok_or_else(|| LaniakeaError::Serialization("IC must be array".into()))?;
     let mut gamma_abc_g1 = Vec::with_capacity(ic_arr.len());
-    for ic_item in ic_arr {
-        gamma_abc_g1.push(parse_g1_affine_from_json(ic_item)?);
+    for (i, ic_item) in ic_arr.iter().enumerate() {
+        gamma_abc_g1.push(parse_g1_affine_from_json(ic_item, &format!("vk.IC[{i}]"))?);
     }
 
     Ok(VerifyingKey {
@@ -137,75 +157,71 @@ pub fn parse_vk_from_json(json_str: &str) -> Result<VerifyingKey<Bn254>, Laniake
     })
 }
 
-fn parse_g1_affine_from_json(value: &serde_json::Value) -> Result<G1Affine, LaniakeaError> {
-    let arr = value
-        .as_array()
-        .ok_or_else(|| LaniakeaError::Serialization("G1 must be array".into()))?;
+fn parse_g1_affine_from_json(
+    value: &serde_json::Value,
+    what: &str,
+) -> Result<G1Affine, LaniakeaError> {
+    let bad = |m: &str| LaniakeaError::Serialization(format!("{what}: {m}"));
+    let arr = value.as_array().ok_or_else(|| bad("G1 must be an array"))?;
     if arr.len() != 3 {
-        return Err(LaniakeaError::Serialization(
-            "G1 must have 3 elements (x, y, z)".into(),
-        ));
+        return Err(bad("G1 must have 3 elements (x, y, z)"));
     }
-    let x_str = arr[0]
+    points::check_z_is_one(&arr[2], false, what)?;
+    let x = arr[0]
         .as_str()
-        .ok_or_else(|| LaniakeaError::Serialization("G1 x must be string".into()))?;
-    let y_str = arr[1]
+        .ok_or_else(|| bad("G1 x must be a string"))?;
+    let y = arr[1]
         .as_str()
-        .ok_or_else(|| LaniakeaError::Serialization("G1 y must be string".into()))?;
-    // z coordinate (projective) is arr[2], should be "1" for affine
-    let x = Fq::from_str(x_str).map_err(|e| LaniakeaError::Serialization(format!("{:?}", e)))?;
-    let y = Fq::from_str(y_str).map_err(|e| LaniakeaError::Serialization(format!("{:?}", e)))?;
-    Ok(G1Affine::new_unchecked(x, y))
+        .ok_or_else(|| bad("G1 y must be a string"))?;
+    points::g1_from_decimals(x, y, what)
 }
 
-fn parse_g2_affine_from_json(value: &serde_json::Value) -> Result<G2Affine, LaniakeaError> {
-    let arr = value
-        .as_array()
-        .ok_or_else(|| LaniakeaError::Serialization("G2 must be array".into()))?;
+fn parse_g2_affine_from_json(
+    value: &serde_json::Value,
+    what: &str,
+) -> Result<G2Affine, LaniakeaError> {
+    let bad = |m: &str| LaniakeaError::Serialization(format!("{what}: {m}"));
+    let arr = value.as_array().ok_or_else(|| bad("G2 must be an array"))?;
     if arr.len() != 3 {
-        return Err(LaniakeaError::Serialization(
-            "G2 must have 3 elements (x, y, z)".into(),
-        ));
+        return Err(bad("G2 must have 3 elements (x, y, z)"));
     }
-    let x_arr = arr[0]
-        .as_array()
-        .ok_or_else(|| LaniakeaError::Serialization("G2 x must be array".into()))?;
-    let y_arr = arr[1]
-        .as_array()
-        .ok_or_else(|| LaniakeaError::Serialization("G2 y must be array".into()))?;
-    // z coordinate is arr[2], should be [1, 0] for affine
-    if x_arr.len() != 2 || y_arr.len() != 2 {
-        return Err(LaniakeaError::Serialization(
-            "G2 x/y must have 2 elements".into(),
-        ));
-    }
-    let x0_str = x_arr[0]
-        .as_str()
-        .ok_or_else(|| LaniakeaError::Serialization("G2 x[0] must be string".into()))?;
-    let x1_str = x_arr[1]
-        .as_str()
-        .ok_or_else(|| LaniakeaError::Serialization("G2 x[1] must be string".into()))?;
-    let y0_str = y_arr[0]
-        .as_str()
-        .ok_or_else(|| LaniakeaError::Serialization("G2 y[0] must be string".into()))?;
-    let y1_str = y_arr[1]
-        .as_str()
-        .ok_or_else(|| LaniakeaError::Serialization("G2 y[1] must be string".into()))?;
-
-    let x0 = Fq::from_str(x0_str).map_err(|e| LaniakeaError::Serialization(format!("{:?}", e)))?;
-    let x1 = Fq::from_str(x1_str).map_err(|e| LaniakeaError::Serialization(format!("{:?}", e)))?;
-    let y0 = Fq::from_str(y0_str).map_err(|e| LaniakeaError::Serialization(format!("{:?}", e)))?;
-    let y1 = Fq::from_str(y1_str).map_err(|e| LaniakeaError::Serialization(format!("{:?}", e)))?;
-
-    let x_fq2 = Fq2::new(x0, x1);
-    let y_fq2 = Fq2::new(y0, y1);
-
-    Ok(G2Affine::new_unchecked(x_fq2, y_fq2))
+    points::check_z_is_one(&arr[2], true, what)?;
+    let pair = |v: &serde_json::Value| -> Result<[String; 2], LaniakeaError> {
+        let a = v
+            .as_array()
+            .filter(|a| a.len() == 2)
+            .ok_or_else(|| bad("G2 coordinates must be [c0, c1] arrays"))?;
+        let s = |i: usize| {
+            a[i].as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| bad("G2 coordinate components must be strings"))
+        };
+        Ok([s(0)?, s(1)?])
+    };
+    let (x, y) = (pair(&arr[0])?, pair(&arr[1])?);
+    points::g2_from_decimals([&x[0], &x[1]], [&y[0], &y[1]], what)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extract_public_signals_never_panics_on_bad_lengths() {
+        let w = [Fr::from(1u64), Fr::from(7u64), Fr::from(9u64)];
+        assert_eq!(extract_public_signals(&w, 1).unwrap(), vec![]);
+        assert_eq!(extract_public_signals(&w, 3).unwrap().len(), 2);
+        for (witness, n) in [(&w[..0], 1), (&w[..], 0), (&w[..], 4), (&w[..1], 5)] {
+            assert!(
+                matches!(
+                    extract_public_signals(witness, n),
+                    Err(LaniakeaError::InvalidWitness(_))
+                ),
+                "({}, {n})",
+                witness.len()
+            );
+        }
+    }
     use crate::artifacts::parse_zkey_to_artifact;
     use crate::witness::{WitnessArtifacts, WitnessCalculator};
     use crate::witness_wasmi::WasmiWitnessAdapter;
@@ -249,7 +265,8 @@ mod tests {
         let vk = parse_vk_from_json(&vk_json).expect("failed to parse VK from JSON");
 
         // Extract public signals from witness
-        let public_signals = extract_public_signals(&witness, artifact.num_public_inputs());
+        let public_signals =
+            extract_public_signals(&witness, artifact.num_public_inputs()).unwrap();
 
         // Process VK and verify
         let pvk = Groth16::<Bn254>::process_vk(&vk).expect("failed to process VK");

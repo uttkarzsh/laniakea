@@ -8,8 +8,8 @@
 use ark_serialize::CanonicalSerialize;
 use laniakea_core::backend::prover::parse_vk_from_json;
 use laniakea_core::{
-    parse_zkey_to_artifact, Groth16Backend, LaniakeaError, ProofResult, Prover, ProvingArtifact,
-    ProvingArtifacts, ZkBackend,
+    parse_zkey_to_artifact, CircuitLoadError, Groth16Backend, LaniakeaError, ProofResult, Prover,
+    ProvingArtifact, ProvingArtifacts, WitnessError, ZkBackend,
 };
 use num_bigint::BigInt;
 use std::fs;
@@ -33,6 +33,8 @@ fn artifact() -> ProvingArtifact {
 fn prover() -> Prover {
     Prover::new(&artifact().to_bytes(), &wasm()).expect("build prover")
 }
+
+type Case = (&'static str, Inputs, fn(&WitnessError) -> bool);
 
 fn age_inputs(age: i64, threshold: i64) -> Inputs {
     vec![
@@ -165,13 +167,19 @@ fn repeated_calls_and_failure_followed_by_success() {
     // A circuit abort in the middle of witness generation...
     let err = p.prove(&age_inputs(300, 18)).unwrap_err();
     assert!(
-        matches!(err, LaniakeaError::WitnessGeneration(_)),
+        matches!(
+            err,
+            LaniakeaError::WitnessGeneration(WitnessError::AssertionFailed { .. })
+        ),
         "{err:?}"
     );
     // ...and a rejection before the circuit runs at all.
     let err = p.prove(&[]).unwrap_err();
     assert!(
-        matches!(err, LaniakeaError::WitnessGeneration(_)),
+        matches!(
+            err,
+            LaniakeaError::WitnessGeneration(WitnessError::MissingInputs { .. })
+        ),
         "{err:?}"
     );
 
@@ -186,24 +194,40 @@ fn repeated_calls_and_failure_followed_by_success() {
 // ---------------------------------------------------------- bad inputs
 
 #[test]
-fn malformed_inputs_are_witness_generation_errors() {
+fn witness_failures_carry_a_structured_category() {
     let p = prover();
-    let cases: Vec<(&str, Inputs, &str)> = vec![
+    let cases: Vec<Case> = vec![
         (
             "missing threshold",
             vec![age_inputs(25, 18).remove(0)],
-            "not all inputs",
+            |e| {
+                matches!(
+                    e,
+                    WitnessError::MissingInputs {
+                        set: 1,
+                        expected: 2
+                    }
+                )
+            },
         ),
-        ("no inputs", vec![], "not all inputs"),
+        ("no inputs", vec![], |e| {
+            matches!(
+                e,
+                WitnessError::MissingInputs {
+                    set: 0,
+                    expected: 2
+                }
+            )
+        }),
         (
             "unknown signal",
             [age_inputs(25, 18), vec![("nope".into(), vec![1.into()])]].concat(),
-            "unknown input signal",
+            |e| matches!(e, WitnessError::UnknownSignal { name } if name == "nope"),
         ),
         (
             "repeated signal",
             [age_inputs(25, 18), age_inputs(26, 18)].concat(),
-            "more than once",
+            |e| matches!(e, WitnessError::DuplicateSignal { name } if name == "age"),
         ),
         (
             "too many values for age",
@@ -211,24 +235,39 @@ fn malformed_inputs_are_witness_generation_errors() {
                 ("age".into(), vec![25.into(), 26.into()]),
                 ("threshold".into(), vec![18.into()]),
             ],
-            "expects 1",
+            |e| matches!(e, WitnessError::InputSize { signal, expected: 1, got: 2 } if signal == "age"),
         ),
         (
+            // Circom exception code 4 is a failed `assert`.
             "circuit assertion (age exceeds 8 bits)",
             age_inputs(300, 18),
-            "assert failed",
+            |e| matches!(e, WitnessError::AssertionFailed { .. }),
         ),
     ];
-    for (name, inputs, expected) in cases {
+    for (name, inputs, is_expected) in cases {
         match p.prove(&inputs) {
-            Err(LaniakeaError::WitnessGeneration(m)) => {
-                assert!(m.contains(expected), "{name}: `{m}` lacks `{expected}`")
+            Err(LaniakeaError::WitnessGeneration(e)) => {
+                assert!(is_expected(&e), "{name}: wrong category: {e:?}")
             }
             other => panic!(
                 "{name}: expected WitnessGeneration, got {:?}",
                 other.map(|_| "a proof")
             ),
         }
+    }
+}
+
+#[test]
+fn a_failed_witness_does_not_prevent_a_later_valid_proof() {
+    let p = prover();
+    for bad in [age_inputs(300, 18), vec![]] {
+        assert!(matches!(
+            p.prove(&bad),
+            Err(LaniakeaError::WitnessGeneration(_))
+        ));
+        let ok = p.prove(&age_inputs(25, 18)).expect("prove after failure");
+        assert_eq!(ok.public_signals, ["1", "18"]);
+        assert!(verifies(&ok));
     }
 }
 
@@ -277,11 +316,19 @@ fn unusable_wasm_is_rejected_at_construction() {
     let bytes = artifact().to_bytes();
     let err = Prover::new(&bytes, b"not wasm").err().expect("rejected");
     assert!(
-        matches!(&err, LaniakeaError::ArtifactLoad(m) if m.contains("circuit WASM")),
+        matches!(
+            &err,
+            LaniakeaError::CircuitLoad(CircuitLoadError::InvalidModule(_))
+        ),
         "{err:?}"
     );
     assert!(matches!(
         Prover::new(&bytes, &[]),
+        Err(LaniakeaError::CircuitLoad(_))
+    ));
+    // A bad artifact is still an artifact error, not a circuit error.
+    assert!(matches!(
+        Prover::new(&[], &wasm()),
         Err(LaniakeaError::ArtifactLoad(_))
     ));
 }

@@ -1,4 +1,4 @@
-# Laniakea
+# 🌌💫 Laniakea
 
 A Rust-based zero-knowledge proving SDK targeting iOS devices.
 

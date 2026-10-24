@@ -133,16 +133,16 @@ pub struct Prover {
 }
 
 fn load_wasm(wasm_bytes: &[u8]) -> Result<WasmiWitnessCalculator, LaniakeaError> {
-    WasmiWitnessCalculator::new(wasm_bytes)
-        .map_err(|e| LaniakeaError::ArtifactLoad(format!("circuit WASM: {e}")))
+    WasmiWitnessCalculator::new(wasm_bytes).map_err(|e| LaniakeaError::CircuitLoad(e.into()))
 }
 
 impl Prover {
     /// Build a prover from serialized artifacts: the output of
     /// [`ProvingArtifact::to_bytes`] and the circuit's `.wasm`.
     ///
-    /// Errors: [`LaniakeaError::ArtifactLoad`] for unreadable bytes or an
-    /// unusable WASM module, [`LaniakeaError::InvalidArtifact`] for an
+    /// Errors: [`LaniakeaError::ArtifactLoad`] for unreadable artifact bytes,
+    /// [`LaniakeaError::CircuitLoad`] for an unusable WASM module (see
+    /// [`crate::CircuitLoadError`]), [`LaniakeaError::InvalidArtifact`] for an
     /// inconsistent artifact or a WASM/artifact pair with different wire counts.
     pub fn new(artifact_bytes: &[u8], wasm_bytes: &[u8]) -> Result<Self, LaniakeaError> {
         // `from_bytes` has already validated.
@@ -204,9 +204,17 @@ impl Prover {
     ///
     /// Steps: compute the witness; check it fits the artifact; prove. Errors:
     ///
-    /// * [`LaniakeaError::WitnessGeneration`]: unknown, repeated or missing
-    ///   inputs, a wrong array length, or the circuit aborting (a failed
-    ///   `assert` or `===`). No proof is attempted.
+    /// * [`LaniakeaError::WitnessGeneration`]: no witness could be computed and
+    ///   no proof is attempted. The [`crate::WitnessError`] says why; not every
+    ///   variant means bad input:
+    ///   - input validation (unknown, repeated or missing signals, wrong array
+    ///     length): `UnknownSignal`, `DuplicateSignal`, `MissingInputs`,
+    ///     `InputSize`;
+    ///   - `AssertionFailed`: the circuit rejected the inputs (a failed
+    ///     `assert` or `===`);
+    ///   - `ResourceExhausted`: the module ran out of memory;
+    ///   - `CircuitAbort`: any other Circom exception, with its original code;
+    ///   - `Engine`: the witness engine itself failed.
     /// * [`LaniakeaError::InvalidWitness`]: the engine's witness does not fit the
     ///   artifact.
     /// * [`LaniakeaError::ProofGeneration`]: the Groth16 prover failed.
@@ -221,15 +229,14 @@ impl Prover {
         let witness = self
             .witness_engine
             .calculate_witness(inputs)
-            .map_err(|e: WasmiWitnessError| LaniakeaError::WitnessGeneration(e.to_string()))?;
+            .map_err(|e: WasmiWitnessError| LaniakeaError::WitnessGeneration(e.into()))?;
 
         let n_inst = self.matrices.num_instance_variables;
         check_witness_shape(&witness, self.witness_len(), n_inst)?;
 
         let proof = prove_validated(&self.proving_key, &self.matrices, &witness)?;
 
-        // Safe after the shape check: witness.len() == wire count >= n_inst >= 1.
-        let public_signals = extract_public_signals(&witness, n_inst)
+        let public_signals = extract_public_signals(&witness, n_inst)?
             .iter()
             .map(fr)
             .collect();
