@@ -3,6 +3,19 @@ name = "laniakea-uniffi"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+# `lib` for Rust tests and dependents; `staticlib` for linking into an iOS app.
+# No `cdylib`: it is not needed yet and cannot link for iOS without the SDK.
+crate-type = ["lib", "staticlib"]
+
 [dependencies]
 laniakea-core = { path = "../laniakea-core" }
 uniffi        = { workspace = true }
+thiserror     = { workspace = true }
+num-bigint    = { workspace = true }
+ark-bn254     = { workspace = true }
+ark-ff        = { workspace = true }
+
+[dev-dependencies]
+ark-serialize = { workspace = true }
+serde_json    = { workspace = true }

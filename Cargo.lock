@@ -2546,7 +2546,13 @@ dependencies = [
 name = "laniakea-uniffi"
 version = "0.1.0"
 dependencies = [
+ "ark-bn254",
+ "ark-ff",
+ "ark-serialize",
  "laniakea-core",
+ "num-bigint",
+ "serde_json",
+ "thiserror 1.0.39",
  "uniffi",
 ]
 
