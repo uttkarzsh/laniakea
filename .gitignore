@@ -8,3 +8,5 @@ node_modules/
 
 # Generated Circom witness files
 *.wtns
+
+.DS_Store

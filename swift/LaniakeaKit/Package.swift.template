@@ -1,0 +1,33 @@
+// swift-tools-version:5.9
+//
+// Template for the Laniakea Swift package. scripts/package-xcframework.sh copies
+// it to <target>/uniffi/ios-<min>/LaniakeaKit/Package.swift next to the generated
+// Sources/Laniakea/laniakea.swift and laniakeaFFI.xcframework. The generated
+// binding is never kept in the source tree.
+//
+// UNVERIFIED without Xcode: nothing here has been built by SwiftPM/Xcode.
+import PackageDescription
+
+let package = Package(
+    name: "LaniakeaKit",
+    // @IOS_MIN@ is replaced with IPHONEOS_DEPLOYMENT_TARGET by
+    // scripts/package-xcframework.sh. The XCFramework has no macOS slice, so
+    // macOS is deliberately not listed.
+    platforms: [.iOS("@IOS_MIN@")],
+    products: [
+        .library(name: "LaniakeaKit", targets: ["Laniakea"]),
+    ],
+    targets: [
+        // The C module "laniakeaFFI" (header + module.modulemap) and the Rust
+        // static library, as one XCFramework.
+        .binaryTarget(name: "laniakeaFFI", path: "laniakeaFFI.xcframework"),
+        // The UniFFI-generated Swift, which does `import laniakeaFFI`.
+        .target(
+            name: "Laniakea",
+            dependencies: ["laniakeaFFI"],
+            path: "Sources/Laniakea"
+        ),
+    ],
+    // UniFFI 0.28.3's generated code does not compile in Swift 6 language mode.
+    swiftLanguageVersions: [.v5]
+)
