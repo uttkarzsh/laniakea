@@ -14,7 +14,8 @@
 # What it does, in order:
 #   1. checks prerequisites and that each Rust target is installed;
 #   2. checks, per target, that laniakea-uniffi's iOS dependency graph contains no
-#      host-only bindgen/CLI crates and no JIT/Wasmer crates;
+#      host-only bindgen/CLI crates, no JIT/Wasmer crates and none of the crates the
+#      dependency audit removed (ethers-core, tempfile; see FORBIDDEN below);
 #   3. `cargo build -p laniakea-uniffi --target <t> --release` (never --workspace:
 #      that would unify uniffi's host-only `cli`/`bindgen` features into the iOS build);
 #   4. inspects each library (architecture, exported UniFFI symbols, and the
@@ -59,13 +60,36 @@ LIBNAME=liblaniakea_uniffi.a
 clean_stage
 
 # --- 2. dependency isolation (package-specific; never a workspace-wide tree)
-FORBIDDEN='^(uniffi_bindgen|uniffi-bindgen|clap|clap_[a-z]+|askama[a-z_]*|goblin|wasmer[a-z_-]*|cranelift[a-z_-]*|wasmtime[a-z_-]*|ark-circom|dynasm[a-z_]*|regalloc[a-z0-9_]*)$'
+# Matched against crate NAMES (version-independent) in the graph of the iOS target
+# itself. Only what must never reach iOS is listed: host-only UniFFI tooling, JIT
+# and Wasmer, ark-circom, and crates the Phase 7 audit removed from this graph
+# (ethers-core and the Ethereum stack with it; tempfile, which needs a writable
+# filesystem). Desktop-only dependencies are not a problem as long as they stay out
+# of THIS graph, so nothing is banned workspace-wide. getrandom is deliberately not
+# listed: getrandom 0.2 (rand/ark-std) seeds the proof randomness.
+FORBIDDEN='^(uniffi_bindgen|uniffi-bindgen|clap|clap_[a-z]+|askama[a-z_]*|goblin|wasmer[a-z_-]*|cranelift[a-z_-]*|wasmtime[a-z_-]*|ark-circom|dynasm[a-z_]*|regalloc[a-z0-9_]*|ethers[a-z0-9_-]*|tempfile)$'
 for t in $TARGETS; do
   echo "==> dependency check ($t)"
+  # The decision is made on the printed graph, never on cargo's exit status
+  # (`cargo tree -i <crate>` exits 0 whether or not the crate is present).
+  # A failing `cargo tree` stops the script (pipefail); an empty or truncated
+  # graph must not pass either, so the graph has to contain our own crates.
   crates="$(cargo tree -p laniakea-uniffi --target "$t" -e normal,build --prefix none --format '{p}' | awk '{print $1}' | sort -u)"
+  for own in laniakea-uniffi laniakea-core wasmi-witness; do
+    grep -qx "$own" <<<"$crates" || die "dependency check ($t): $own is missing from the dependency graph; cannot trust an incomplete graph"
+  done
   bad="$(printf '%s\n' "$crates" | grep -E "$FORBIDDEN" || true)"
-  [ -z "$bad" ] || die "forbidden crates in the $t graph:
-$bad"
+  if [ -n "$bad" ]; then
+    why=""
+    for c in $bad; do
+      why="$why
+--- who depends on $c:
+$(cargo tree -p laniakea-uniffi --target "$t" -e normal,build -i "$c" 2>/dev/null | head -12 || true)"
+    done
+    die "forbidden crates in the $t graph:
+$bad
+$why"
+  fi
   feats="$(cargo tree -p laniakea-uniffi --target "$t" -e features -i uniffi --prefix none 2>/dev/null | grep -E '^uniffi feature' | sort -u || true)"
   if printf '%s\n' "$feats" | grep -Eq 'feature "(cli|bindgen)"'; then
     die "uniffi host-only features (cli/bindgen) are enabled for $t:
