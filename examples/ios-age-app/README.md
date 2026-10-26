@@ -214,10 +214,31 @@ xcodebuild -project "$P" -scheme AgeCheckDemo -configuration Debug \
 xcodebuild -project "$P" -scheme AgeCheckDemo -configuration Release \
   -destination "platform=iOS Simulator,id=$UDID" build
 
+# Release, any Apple-silicon simulator
+xcodebuild -project "$P" -scheme AgeCheckDemo -configuration Release \
+  -destination 'generic/platform=iOS Simulator' build
+
 # Release, device: compile and link only, no code signing
 xcodebuild -project "$P" -scheme AgeCheckDemo -configuration Release \
   -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build
 ```
+
+**Supported architectures:** arm64 devices and arm64 (Apple-silicon) simulators only.
+The XCFramework has exactly two slices, `ios-arm64` and `ios-arm64-simulator`. The
+app target sets `EXCLUDED_ARCHS[sdk=iphonesimulator*] = x86_64`, so the **app
+executable** is arm64-only in simulator builds, including the generic one. The setting
+is conditional on the simulator SDK; device builds are unaffected (`ARCHS = arm64`).
+
+The exclusion applies to the app target only. Package targets do not inherit it: in the
+generic simulator build, LaniakeaKit's Swift wrapper (`laniakea.swift`) was still
+compiled for both arm64 and x86_64 (a universal object), and only the arm64 code ended up
+in the app. That is harmless for the build, but **any other app that consumes
+LaniakeaKit needs the same simulator exclusion** (`EXCLUDED_ARCHS[sdk=iphonesimulator*] =
+x86_64`), because the package does not impose it.
+
+**Intel (x86_64) simulator support is deferred**: it needs an x86_64 simulator slice
+(`INCLUDE_X86_64_SIM=1 scripts/package-xcframework.sh`, not tested with the app) and
+removing the exclusion.
 
 **Build results** with Xcode 27.1:
 
@@ -226,20 +247,27 @@ xcodebuild -project "$P" -scheme AgeCheckDemo -configuration Release \
 | Debug | iPhone Duo simulator (iOS 27.1, arm64) | succeeds |
 | Release | iPhone Duo simulator (iOS 27.1, arm64) | succeeds |
 | Release | `generic/platform=iOS`, unsigned | succeeds |
-| Release | `generic/platform=iOS Simulator` | **fails** (see below) |
+| Release | `generic/platform=iOS Simulator` (arm64 only) | succeeds |
 
-**Why the generic Release simulator build fails:**
-- **Cause.** A generic simulator build in Release builds both arm64 and x86_64
-  (`ONLY_ACTIVE_ARCH = NO`), but the XCFramework has only an arm64 simulator slice.
-- **Symptom.** Linking fails with `Undefined symbols for architecture x86_64`.
-- **Consequence.** Intel (x86_64) simulators are not supported.
+**Why the generic simulator build needed the exclusion:** a generic simulator build
+uses `ARCHS_STANDARD`, which for the simulator SDK is `arm64 x86_64`, while the
+XCFramework has only an arm64 simulator slice. Before the exclusion it failed at link
+time with `Undefined symbols for architecture x86_64` (exit 65). With the exclusion the
+app executable is arm64 only (checked with `lipo -archs` on the Debug simulator,
+Release simulator and Release device products; the package's own wrapper object is the
+exception described above).
 
 **What the builds contained:**
-- **Resources.** In all three successful builds, the bundled `age_check.wasm` and
-  `age_check.artifact` were byte-identical to `AgeCheckApp/Resources/`, and no `.zkey`
-  was bundled.
-- **Release binaries** (simulator and device) had no `fork`/`exec`/`posix_spawn` or
-  socket imports, and no debug-hook strings.
+- **Resources.** In the Debug simulator, Release simulator and Release device products,
+  the bundled `age_check.wasm` and `age_check.artifact` were byte-identical to
+  `AgeCheckApp/Resources/`, and no `.zkey` was bundled. The Release builds for a specific
+  simulator and for the generic simulator write to the same product directory, so the
+  check covered whichever of the two ran last (the generic one).
+- **Release binaries.** The Release simulator and Release device executables inspected
+  in an earlier check, before the x86_64 exclusion was added, had no
+  `fork`/`exec`/`posix_spawn` or socket imports, and no debug-hook strings. That
+  inspection was not repeated for the builds made with the exclusion, including the
+  generic simulator build.
 - **The Debug simulator build** still contains unreachable Rust `std` process and
   networking imports, because Xcode's debug dylib is not dead-stripped.
 
@@ -306,9 +334,11 @@ Per-user Xcode state (`xcuserdata/`) is not part of the project; don't commit it
 - **Swift 6 errors inside `laniakea.swift`**: the generated bindings must be compiled in
   Swift 5 mode, which the package manifest already does. Do not copy `laniakea.swift`
   into the app target.
-- **`Undefined symbols for architecture x86_64`**: a build for
-  `generic/platform=iOS Simulator` in Release, or for an Intel simulator. Build for a
-  specific Apple-silicon simulator instead (section 5).
+- **Building for an Intel (x86_64) simulator:** not supported (section 5). The exact
+  failure has not been tested, so no specific error message is documented. If the
+  project's `EXCLUDED_ARCHS[sdk=iphonesimulator*] = x86_64` setting is removed, a
+  generic simulator build is expected to fail with `Undefined symbols for architecture
+  x86_64` again, as it did before the setting was added.
 - **Missing package after a fresh checkout**: `target/` is generated. Run
   `scripts/package-xcframework.sh`, then reopen the project.
 
@@ -329,8 +359,8 @@ Per-user Xcode state (`xcuserdata/`) is not part of the project; don't commit it
 - **Accessibility.** No testing has been done.
 
 **Unsupported or by design:**
-- **Intel simulators.** Not supported: the XCFramework has no x86_64 simulator slice, so
-  the generic Release simulator build fails.
+- **Intel simulators.** Deferred: the XCFramework has no x86_64 simulator slice and the
+  project excludes x86_64 for simulator builds.
 - **Proof verification.** The app generates proofs but does not verify them, by design of
   the current FFI.
 - **Eligibility.** Read from the public signals `[out, threshold]`, not from the fact that
