@@ -308,6 +308,9 @@ scripts/prepare-ios-app-resources.sh --check
 scripts/swift-app-logic-test.sh
 scripts/package-xcframework.sh
 
+# Verifying-key consistency (zkey = bundled artifact = verification_key.json = snarkjs export)
+REQUIRE_SNARKJS=1 scripts/check-vk-consistency.sh
+
 # Format
 cargo fmt --all
 ```
