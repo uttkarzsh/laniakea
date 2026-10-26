@@ -311,6 +311,9 @@ scripts/package-xcframework.sh
 # Verifying-key consistency (zkey = bundled artifact = verification_key.json = snarkjs export)
 REQUIRE_SNARKJS=1 scripts/check-vk-consistency.sh
 
+# Pins the age_check circuit's actual behavior (no `out == 1` constraint, no 8-bit range check)
+REQUIRE_SNARKJS=1 scripts/check-circuit-behavior.sh
+
 # Format
 cargo fmt --all
 ```
