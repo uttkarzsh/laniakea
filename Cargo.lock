@@ -2634,7 +2634,6 @@ dependencies = [
  "ark-serialize",
  "ark-snark",
  "ark-std",
- "ethers-core",
  "num-bigint",
  "rand",
  "serde",

@@ -19,7 +19,6 @@ thiserror     = { workspace = true }
 serde         = { workspace = true }
 serde_json    = { workspace = true }
 rand          = { workspace = true }
-ethers-core   = { workspace = true }
 
 # Portable witness generation (Wasmi interpreter, pure Rust). Used on every
 # platform, including iOS: this is the only witness engine the Prover uses.
