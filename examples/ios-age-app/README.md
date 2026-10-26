@@ -92,9 +92,28 @@ Other combinations of language mode and concurrency settings have not been teste
 
 ## Prerequisites
 
+Required:
 - macOS on Apple silicon, Xcode 27.1 (iOS 27.1 simulator runtime), Swift 6.4 toolchain.
-- Rust with `aarch64-apple-ios` and `aarch64-apple-ios-sim` (`rustup target add ...`).
-- Optional: `snarkjs` for independent proof verification in the logic test.
+  Full Xcode is needed for `xcodebuild` (the XCFramework and the app builds). The
+  scripts also call `nm`, `ar`, `otool`, `lipo`, `cmp`, `shasum` and `swiftc`, which
+  Xcode and its command-line tools provide.
+- Rust with `cargo` and the targets `aarch64-apple-ios` and `aarch64-apple-ios-sim`
+  (`rustup target add ...`).
+- `python3`. It is used to read Cargo's target directory (`cargo metadata`, in
+  `scripts/lib/common.sh` and `scripts/gen-swift-bindings.sh`, so every script needs it)
+  and, in `scripts/build-ios.sh`, to check where Cargo wrote its build artifacts. No
+  Python packages are needed.
+
+Optional:
+- `snarkjs` (needs Node.js) for independent proof verification in the logic test and the
+  smoke test. Without it the verification step is skipped; `REQUIRE_SNARKJS=1` makes a
+  missing `snarkjs` an error.
+
+Not needed:
+- `circom`: the compiled circuit artifacts are checked in.
+- A physical iPhone or an Apple Developer account for the simulator builds and the
+  unsigned generic-device build. Installing on a physical device needs a valid signing
+  identity, which this repository does not provide (see section 5).
 
 ## 1. Resources
 
@@ -188,13 +207,21 @@ created with Xcode's iOS App template, not hand-written.
 | Target sources | The five files in `examples/ios-age-app/AgeCheckApp/`, referenced in place (not copied). The template's own Swift files were removed; only `AgeCheckDemo/Assets.xcassets` remains from the template. |
 | Bundle resources | `age_check.wasm` and `age_check.artifact` (Copy Bundle Resources). |
 | Package dependency | The local package `../../../target/uniffi/ios-14.0/LaniakeaKit` (relative to the project directory). The app links its product `LaniakeaKit` and uses `import Laniakea`. |
-| Settings | Deployment target iOS 16.0; the Swift and concurrency settings in Concurrency above; bundle identifier `dev.uttkarzsh.AgeCheckDemo`; automatic signing with no development team. |
+| Settings | Deployment target iOS 16.0; the Swift and concurrency settings in Concurrency above; bundle identifier `dev.laniakea.AgeCheckDemo`; automatic signing with no development team (see Signing below). |
 | Debug vs Release | Debug defines `DEBUG`. Release does not, so `LaunchOptions` and the `AGECHECK` trace are compiled out. |
 
 The package lives in the generated, git-ignored `target/` directory, so after a fresh
 checkout **run steps 1 and 3 before opening the project**. The path assumes Cargo's
 default target directory and `IPHONEOS_DEPLOYMENT_TARGET=14.0`. With a different
 `CARGO_TARGET_DIR` or deployment target, re-add the package from its actual location.
+
+**Signing:** the project contains no development team ID and no signing identity
+(`CODE_SIGN_STYLE = Automatic`, `DEVELOPMENT_TEAM` unset), so the simulator builds and the
+unsigned device build (`CODE_SIGNING_ALLOWED=NO`) need nothing personal. To install on a
+physical device, select your own team under Signing & Capabilities and, if
+`dev.laniakea.AgeCheckDemo` is unavailable to your team, change the bundle identifier
+locally. That path has not been exercised: no device is paired and no signing identity
+was available here.
 
 **Opening and running:** open the project in Xcode, choose the **iPhone Duo** (iOS 27.1)
 simulator and Product → Run. For scripted input, add `-AgeCheckAutoProveAge 25` under

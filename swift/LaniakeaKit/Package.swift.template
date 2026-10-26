@@ -5,7 +5,10 @@
 // Sources/Laniakea/laniakea.swift and laniakeaFFI.xcframework. The generated
 // binding is never kept in the source tree.
 //
-// UNVERIFIED without Xcode: nothing here has been built by SwiftPM/Xcode.
+// Verified so far: Xcode builds this package as the demo app's local package
+// dependency (simulator and unsigned generic-device builds; see
+// examples/ios-age-app/README.md). Not exercised: standalone `swift build` of the
+// package, and any run on a physical device.
 import PackageDescription
 
 let package = Package(
