@@ -15,7 +15,7 @@ Long-term: support for Noir + Barretenberg and other proving ecosystems.
 
 ## Current Status
 
-The core Rust proving pipeline is implemented and tested. The iOS-compatible proving code compiles for `aarch64-apple-ios`. Swift/UniFFI application integration is the next major phase.
+The Rust proving pipeline, the UniFFI/Swift bindings, the iOS packaging scripts and a minimal SwiftUI demo app are implemented. The demo builds with Xcode and runs on an iOS Simulator (iPhone Duo, iOS 27.1), where it generates proofs on-device. It has **not** been run on a physical device, and proof timing, memory and binary size on real hardware are unmeasured. Nothing here has been audited.
 
 **What works today:**
 
@@ -27,20 +27,29 @@ The core Rust proving pipeline is implemented and tested. The iOS-compatible pro
 | Portable CircomReduction | ✅ Matches ark-circom output element-for-element |
 | Portable Groth16 proving | ✅ End-to-end test passes; proof verifies with snarkjs |
 | iOS compilation + dependency isolation | ✅ No ark-circom / Wasmer / Cranelift on iOS target |
+| High-level `Prover` API | ✅ Inputs in, proof + public signals out; validated artifacts, point validation, structured errors |
+| UniFFI bindings (`LaniakeaProver`) | ✅ Swift bindings generated; macOS Swift smoke test passes, proof verified by snarkjs |
+| iOS static libraries + XCFramework + Swift package | ✅ Built with Xcode 27.1 (device + arm64 simulator slices) |
+| SwiftUI age-check demo | ✅ Xcode project builds; runs on the iPhone Duo simulator |
 
 **Not yet complete:**
 
-- UniFFI / Swift bindings (Phase 6)
-- Packaged iOS app with real SwiftUI flow (Phase 7)
+- Physical-device testing and measurements (proving time, memory, binary size, battery/thermal)
+- Signed device builds, Release archive and App Store validation
+- On-device proof verification (the FFI exposes no verifier; the demo generates proofs but does not verify them)
+- Intel (x86_64) simulator support
+- Production hardening and security review
 
 ## Architecture
 
 ```
-Swift / iOS (future)
+SwiftUI app (examples/ios-age-app)
         ↓
-     UniFFI
+ Swift package LaniakeaKit (`import Laniakea`)
         ↓
-  laniakea-core
+ UniFFI  (laniakea-uniffi: LaniakeaProver)
+        ↓
+  laniakea-core  (Prover)
         ├──────────────────────────────────────────┐
         │                                          │
         ▼                                          ▼
@@ -78,19 +87,19 @@ ProvingArtifact { ProvingKey, ConstraintMatrices }
         ↓
 serialize (CanonicalSerialize)
         ↓
-artifact.bin  ──► bundled with iOS app
+age_check.artifact  ──► bundled with iOS app (export_artifact)
 ```
 
 ### Runtime (iOS)
 
 ```
 User input (age=25, threshold=18)
-        ↓
+        ↓  (SwiftUI → LaniakeaProver.prove via UniFFI)
 age_check.wasm  ──► Wasmi interpreter
         ↓
 Vec<Fr> witness  [1, 1, 18, 25, ...]
         ↓
-ProvingArtifact (deserialized from artifact.bin)
+ProvingArtifact (deserialized from age_check.artifact)
         ↓
 prove_with_artifact(artifact, witness)
         ├─► CircomReduction::witness_map_from_matrices()
@@ -98,8 +107,10 @@ prove_with_artifact(artifact, witness)
         ▼
 Groth16 Proof (a, b, c in G1/G2)
         ↓
-proof_to_json()  → snarkjs-compatible JSON
+proof_json + public signals  → snarkjs-compatible JSON, e.g. ["1", "18"]
 ```
+
+Public signals are `[out, threshold]`. The age-check circuit does **not** constrain `out == 1`, so a valid proof exists for an ineligible age too; callers must read `out`. `GreaterEqThan(8)` also does not enforce that inputs are in 0–255; the demo app enforces that range itself.
 
 ## Implemented Pieces
 
@@ -149,20 +160,33 @@ crates/
 │   │   ├── backend/
 │   │   │   ├── circom_reduction.rs   # Portable CircomReduction
 │   │   │   ├── groth16.rs            # Groth16 backend
+│   │   │   ├── points.rs             # Curve/subgroup point validation
 │   │   │   ├── prover.rs             # Portable prove_with_artifact()
 │   │   │   └── mod.rs
+│   │   ├── api.rs                # High-level Prover API
+│   │   ├── error.rs              # Structured errors
 │   │   ├── witness.rs            # WitnessCalculator trait
 │   │   ├── witness_wasmi.rs      # Wasmi adapter
 │   │   └── witness_ark.rs        # ark-circom adapter (desktop)
-│   └── tests/
-│       ├── witness_equivalence.rs
-│       └── circom_reduction_compare.rs
+│   └── tests/                    # witness, reduction, artifact/point validation, Prover API
 ├── wasmi-witness/
 │   └── src/lib.rs                # Standalone Wasmi witness execution
 ├── laniakea-uniffi/
-│   └── ...                       # FFI layer (future Swift integration)
+│   └── src/                      # UniFFI layer: LaniakeaProver, ProverError
+├── uniffi-bindgen/               # Host-only Swift binding generator
 └── laniakea-cli/
-    └── ...                       # CLI tooling
+    └── src/bin/export_artifact.rs  # .zkey → ProvingArtifact bytes
+
+scripts/
+├── gen-swift-bindings.sh         # Generate Swift bindings
+├── swift-smoke.sh                # macOS Swift smoke test (+ snarkjs verification)
+├── build-ios.sh                  # Build + verify iOS static libraries
+├── package-xcframework.sh        # XCFramework + LaniakeaKit Swift package
+├── prepare-ios-app-resources.sh  # Copy/verify the demo app's resources
+├── swift-app-logic-test.sh       # macOS logic tests for the demo app
+└── run-ios-sim-app.sh            # Scripted simulator build/run harness
+
+swift/LaniakeaKit/                # Package.swift template (package is generated under target/)
 
 circuits/
 └── age_check/
@@ -173,8 +197,10 @@ circuits/
     └── verification_key.json
 
 examples/
-└── ios-age-app/
-    └── ...                       # iOS example / integration area
+└── ios-age-app/                  # SwiftUI age-check demo (see its README)
+    ├── AgeCheckApp/              # app sources + bundled resources
+    ├── AgeCheckDemo/             # Xcode project
+    └── Tests-macOS/              # logic tests
 ```
 
 ## Development Phases
@@ -215,7 +241,7 @@ examples/
 ### Phase 5 — High-level Rust proving API
 **Status: COMPLETE**
 
-Goal: Clean API hiding Arkworks internals
+Goal: Clean API hiding Arkworks internals, with validated artifacts, point validation and structured errors
 
 ```rust
 // From serialized artifact bytes (validated on construction):
@@ -229,21 +255,22 @@ let result = prover.prove(&inputs)?;
 ```
 
 ### Phase 6 — UniFFI / Swift integration
-**Status: NOT STARTED / PARTIAL INFRASTRUCTURE ONLY**
+**Status: COMPLETE (simulator only)**
 
-- Expose high-level Rust API via UniFFI
-- Generate Swift bindings
-- Ergonomic SwiftUI API
-- Keep Arkworks/internal types off FFI boundary
+- 6a: high-level API exposed via UniFFI (`LaniakeaProver`), no Arkworks types on the FFI boundary
+- 6b: Swift bindings generation and a macOS Swift smoke test
+- 6c: iOS static-library build, XCFramework and Swift package (`LaniakeaKit`)
+- 6d: minimal SwiftUI age-check demo with an Xcode project, run on the iOS Simulator
 
-### Phase 7 — Real iOS packaging and on-device proving
+UniFFI is pinned at 0.28.3; the generated bindings compile in Swift 5 language mode.
+
+### Phase 7 — On-device proving and measurement
 **Status: NOT STARTED**
 
-- Package Rust library for iOS
-- Bundle WASM + proving artifact with app
-- SwiftUI flow: user input → witness → proof
-- Test on simulator + device
+- Run on a physical device (signed build)
 - Measure proving time, memory, binary size, battery/thermal
+- Release archive / App Store validation
+- Decide whether to expose on-device verification
 
 ### Phase 8 — Production hardening
 **Status: FUTURE**
@@ -270,8 +297,16 @@ cargo check --workspace
 # iOS target check
 cargo check -p laniakea-core --target aarch64-apple-ios
 
-# Core tests (witness, artifacts, reduction, proving)
-cargo test -p wasmi-witness -p laniakea-core
+# Rust tests (witness, artifacts, reduction, proving, FFI layer)
+cargo test -p wasmi-witness -p laniakea-core -p laniakea-uniffi
+
+# Swift smoke test (macOS host; set REQUIRE_SNARKJS=1 to require snarkjs)
+scripts/swift-smoke.sh
+
+# Demo app: resources, logic tests (macOS), iOS package (needs Xcode)
+scripts/prepare-ios-app-resources.sh --check
+scripts/swift-app-logic-test.sh
+scripts/package-xcframework.sh
 
 # Format
 cargo fmt --all
