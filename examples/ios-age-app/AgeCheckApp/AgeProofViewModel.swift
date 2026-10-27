@@ -3,6 +3,7 @@
 
 import Combine
 import Foundation
+import LaniakeaKit
 
 @MainActor
 final class AgeProofViewModel: ObservableObject {
@@ -23,18 +24,18 @@ final class AgeProofViewModel: ObservableObject {
     @Published var ageText = ""
     @Published private(set) var phase: Phase = .notLoaded
 
-    private let loadResources: @Sendable () throws(AgeProofError) -> CircuitResources
+    private let loadCircuit: @Sendable () throws(AgeProofError) -> Circuit
     private var service: AgeProofService?
     /// The load or proof in flight, if any. Internal so tests can await it.
     private(set) var work: Task<Void, Never>?
 
-    /// `loadResources` is called once, off the main actor. Tests inject their own.
+    /// `loadCircuit` is called once, off the main actor. Tests inject their own.
     init(
-        loadResources: @escaping @Sendable () throws(AgeProofError) -> CircuitResources = {
-            () throws(AgeProofError) -> CircuitResources in try AgeProofViewModel.bundledResources()
+        loadCircuit: @escaping @Sendable () throws(AgeProofError) -> Circuit = {
+            () throws(AgeProofError) -> Circuit in try AgeProofViewModel.bundledCircuit()
         }
     ) {
-        self.loadResources = loadResources
+        self.loadCircuit = loadCircuit
     }
 
     var ageInput: Result<UInt8, AgeInputError> { AgeProofService.parseAge(ageText) }
@@ -65,11 +66,11 @@ final class AgeProofViewModel: ObservableObject {
     func load(autoSubmitAge: String? = nil) {
         guard phase == .notLoaded else { return }
         phase = .loading
-        let loadResources = self.loadResources
+        let loadCircuit = self.loadCircuit
         work = Task {
             let result = await Task.detached(priority: .userInitiated) { () -> Result<AgeProofService, AgeProofError> in
                 do throws(AgeProofError) {
-                    return .success(try AgeProofService(resources: loadResources()))
+                    return .success(try await AgeProofService(circuit: loadCircuit()))
                 } catch {
                     return .failure(error)
                 }
@@ -113,7 +114,7 @@ final class AgeProofViewModel: ObservableObject {
             #endif
             let next: Phase
             do throws(AgeProofError) {
-                // Runs on the service's actor, off the main actor; this task only
+                // The heavy work runs in the SDK's `Prover` actor, not on the main actor; this task only
                 // resumes here when the proof is done.
                 next = .proved(age: age, try await service.prove(age: age))
             } catch {
@@ -138,20 +139,13 @@ final class AgeProofViewModel: ObservableObject {
         }
     }
 
-    /// The production resource loader: both files from the app bundle.
-    nonisolated static func bundledResources() throws(AgeProofError) -> CircuitResources {
-        func read(_ name: String, _ ext: String) throws(AgeProofError) -> Data {
-            let file = "\(name).\(ext)"
-            guard let url = Bundle.main.url(forResource: name, withExtension: ext) else {
-                throw .resourceUnavailable(name: file, detail: "not found in the app bundle")
-            }
-            do {
-                return try Data(contentsOf: url)
-            } catch {
-                throw .resourceUnavailable(name: file, detail: error.localizedDescription)
-            }
+    /// The production loader: age_check.artifact and age_check.wasm from the app bundle.
+    nonisolated static func bundledCircuit() throws(AgeProofError) -> Circuit {
+        do {
+            return try Circuit(name: "age_check")
+        } catch {
+            throw .wrapping(error)
         }
-        return CircuitResources(artifact: try read("age_check", "artifact"), wasm: try read("age_check", "wasm"))
     }
 }
 
@@ -169,7 +163,7 @@ nonisolated func debugTrace(_ message: @autoclosure () -> String) {
 /// `enqueue()` is called just before the proving task awaits the service; it
 /// queues one main-actor job. That job can run before the proving task resumes
 /// only if the `await` gave up the main actor, i.e. the proof ran elsewhere (the
-/// service's actor; the service traces `prover-call mainThread=false`). Had the
+/// SDK's `Prover` actor). Had the
 /// proof run on the main actor, the task would not have suspended and
 /// `proofFinished()` would come first. The answer does not depend on how long the
 /// proof takes. `waitMs` is how long the job waited for the main actor (which is

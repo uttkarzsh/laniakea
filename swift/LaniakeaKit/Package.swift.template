@@ -2,7 +2,8 @@
 //
 // Template for the Laniakea Swift package. scripts/package-xcframework.sh copies
 // it to <target>/uniffi/ios-<min>/LaniakeaKit/Package.swift next to the generated
-// Sources/Laniakea/laniakea.swift and laniakeaFFI.xcframework. The generated
+// Sources/Laniakea/laniakea.swift, the handwritten Swift layer copied from
+// swift/LaniakeaKit/Sources/LaniakeaKit, and laniakeaFFI.xcframework. The generated
 // binding is never kept in the source tree.
 //
 // Verified so far: Xcode builds this package as the demo app's local package
@@ -18,7 +19,9 @@ let package = Package(
     // macOS is deliberately not listed.
     platforms: [.iOS("@IOS_MIN@")],
     products: [
-        .library(name: "LaniakeaKit", targets: ["Laniakea"]),
+        // `import LaniakeaKit`: Circuit, Prover, Proof, LaniakeaError. The generated
+        // `Laniakea` module below is its implementation, not part of the intended API.
+        .library(name: "LaniakeaKit", targets: ["LaniakeaKit"]),
     ],
     targets: [
         // The C module "laniakeaFFI" (header + module.modulemap) and the Rust
@@ -29,6 +32,12 @@ let package = Package(
             name: "Laniakea",
             dependencies: ["laniakeaFFI"],
             path: "Sources/Laniakea"
+        ),
+        // The handwritten Swift API over the generated binding.
+        .target(
+            name: "LaniakeaKit",
+            dependencies: ["Laniakea"],
+            path: "Sources/LaniakeaKit"
         ),
     ],
     // UniFFI 0.28.3's generated code does not compile in Swift 6 language mode.

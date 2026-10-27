@@ -4,8 +4,8 @@ A minimal SwiftUI app that generates a Groth16 (BN254) proof on the device for t
 `circuits/age_check` Circom circuit, through the Rust prover:
 
 ```
-SwiftUI (ContentView) → AgeProofViewModel → AgeProofService (actor)
-  → import Laniakea (UniFFI bindings, LaniakeaKit package) → Rust LaniakeaProver
+SwiftUI (ContentView) → AgeProofViewModel → AgeProofService
+  → import LaniakeaKit (Circuit, Prover, Proof; swift/LaniakeaKit) → UniFFI bindings → Rust LaniakeaProver
   → Wasmi witness generation → Groth16 proof → proof.json + public signals
 ```
 
@@ -41,8 +41,9 @@ AgeCheckApp/
   AgeCheckApp.swift           @main; LaunchOptions (debug-only automation hook)
   ContentView.swift           the screen
   AgeProofViewModel.swift     ObservableObject state; loading and proving off the main actor
-  AgeProofService.swift       actor owning the prover; input parsing; signal classification
-  ProverError+Message.swift   user-facing text for every ProverError case
+  AgeProofService.swift       holds the SDK's Prover; input parsing; signal classification
+  ProverError+Message.swift   user-facing text for every LaniakeaError case (file name kept
+                              for the Xcode project; it extends the SDK's LaniakeaError)
   Resources/
     age_check.wasm            copy of circuits/age_check/age_check_js/age_check.wasm
     age_check.artifact        ProvingArtifact exported from age_check_final.zkey
@@ -52,14 +53,15 @@ Tests-macOS/
 
 ### Concurrency
 
-`LaniakeaProver` (generated) is a non-`Sendable` class. `AgeProofService` is an
-**actor** that creates the prover inside itself and never hands it out, so no
-`@unchecked Sendable` is needed. Every call into Rust happens on the actor's executor,
-one at a time. A `dispatchPrecondition` asserts it is not the main queue.
+The SDK's `Prover` is an **actor** that owns the (non-`Sendable`) generated
+`LaniakeaProver` and never hands it out, so no `@unchecked Sendable` is needed anywhere.
+Every call into Rust happens on the `Prover`'s executor, one at a time, never on the
+main thread. `AgeProofService` is a plain `Sendable` struct that holds the `Prover`.
 
-- **Loading.** Reading the resources, validating the artifact and compiling the WASM all
-  run in a detached task.
-- **Proving.** The view model awaits the actor, so the main actor stays free. The Rust
+- **Loading.** Reading the resources (`Circuit(name:)`) runs in a detached task;
+  validating the artifact and compiling the WASM (`Prover(circuit:)`) run on the
+  `Prover`'s executor.
+- **Proving.** The view model awaits the `Prover`, so the main actor stays free. The Rust
   call itself cannot yield, so it occupies one cooperative-pool thread for the proof's
   duration. Pinning it to a dedicated thread would need a custom actor executor (iOS 17+).
 - **Duplicate submissions.** These are ignored while loading or proving. A failed attempt
@@ -142,9 +144,10 @@ scripts/swift-app-logic-test.sh                    # snarkjs missing -> verifica
 REQUIRE_SNARKJS=1 scripts/swift-app-logic-test.sh  # strict
 ```
 
-The script compiles the generated bindings as module `Laniakea` and builds the app's
+The script compiles the generated bindings as module `Laniakea`, the SDK
+(`swift/LaniakeaKit/Sources/LaniakeaKit`) as module `LaniakeaKit`, and builds the app's
 service, message and view-model files plus `Tests-macOS/ServiceTests.swift` against the
-host library. It covers:
+host library. (The SDK's own tests are `scripts/swift-sdk-test.sh`.) It covers:
 
 - proofs for ages 25, 10, 18, 17, 0 and 255;
 - rejection of malformed signals;
@@ -152,7 +155,7 @@ host library. It covers:
 - what the circuit does with out-of-range ages (raw path);
 - recovery after errors;
 - bad resources;
-- messages for all 17 `ProverError` cases;
+- messages for all 13 `LaniakeaError` cases;
 - view-model behaviour (no duplicate submissions, main actor free while proving).
 
 Finally snarkjs verifies the eligible proof and the (valid) ineligible proof.
@@ -161,7 +164,7 @@ Finally snarkjs verifies the eligible proof and the (valid) ineligible proof.
 
 ```sh
 scripts/package-xcframework.sh
-# -> target/uniffi/ios-14.0/LaniakeaKit/  (Package.swift, Sources/Laniakea, laniakeaFFI.xcframework)
+# -> target/uniffi/ios-14.0/LaniakeaKit/  (Package.swift, Sources/Laniakea, Sources/LaniakeaKit, laniakeaFFI.xcframework)
 ```
 
 The package's minimum is iOS 14 (`IPHONEOS_DEPLOYMENT_TARGET`). The app needs iOS 16+
@@ -179,7 +182,7 @@ the app without `xcodebuild`, and drives it through a launch argument because `s
 cannot tap or type. It installs a separate app (`dev.laniakea.AgeCheckApp`). The
 harness:
 
-- compiles LaniakeaKit's Swift and the app's sources with `swiftc` for
+- compiles LaniakeaKit's Swift (the generated binding and the SDK) and the app's sources with `swiftc` for
   `arm64-apple-ios16.0-simulator` (Debug, `SDKROOT` set);
 - links the Rust library from the XCFramework's simulator slice;
 - bundles the two resources and ad-hoc signs the app;
@@ -208,7 +211,7 @@ created with Xcode's iOS App template, not hand-written.
 | Scheme | `AgeCheckDemo`, shared (`AgeCheckDemo.xcodeproj/xcshareddata/xcschemes/AgeCheckDemo.xcscheme`). |
 | Target sources | The five files in `examples/ios-age-app/AgeCheckApp/`, referenced in place (not copied). The template's own Swift files were removed; only `AgeCheckDemo/Assets.xcassets` remains from the template. |
 | Bundle resources | `age_check.wasm` and `age_check.artifact` (Copy Bundle Resources). |
-| Package dependency | The local package `../../../target/uniffi/ios-14.0/LaniakeaKit` (relative to the project directory). The app links its product `LaniakeaKit` and uses `import Laniakea`. |
+| Package dependency | The local package `../../../target/uniffi/ios-14.0/LaniakeaKit` (relative to the project directory). The app links its product `LaniakeaKit` and uses `import LaniakeaKit`. |
 | Settings | Deployment target iOS 16.0; the Swift and concurrency settings in Concurrency above; bundle identifier `dev.laniakea.AgeCheckDemo`; automatic signing with no development team (see Signing below). |
 | Debug vs Release | Debug defines `DEBUG`. Release does not, so `LaunchOptions` and the `AGECHECK` trace are compiled out. |
 

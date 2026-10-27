@@ -1,15 +1,16 @@
 // Phase 6d logic tests for the age-check app, run on the macOS host by
 // scripts/swift-app-logic-test.sh. Compiled together with the app's
 // AgeProofService.swift, ProverError+Message.swift and AgeProofViewModel.swift,
-// against the generated bindings built as a separate `Laniakea` module (as in the
-// app). XCTest is not used; failures are counted and reported through the exit code.
+// against the SDK built as a separate `LaniakeaKit` module (as in the app). The
+// SDK's own behaviour is tested by swift/LaniakeaKit/Tests-macOS. XCTest is not used;
+// failures are counted and reported through the exit code.
 //
 // Usage: ServiceTests <resources-dir> <out-dir>
 //   reads  <resources-dir>/age_check.artifact and age_check.wasm (the app's bundled copies)
 //   writes <out-dir>/{eligible,ineligible}.{proof,public}.json for snarkjs
 
 import Foundation
-import Laniakea
+import LaniakeaKit
 
 // Everything here runs on the main actor, sequentially; the prover runs on the
 // service's actor.
@@ -62,47 +63,39 @@ func expectFailure(
     }
 }
 
-/// Every ProverError case, one value each. Keep in step with the generated enum:
-/// the exhaustive switch in `caseName` fails to compile if a case is added.
-let allProverErrors: [ProverError] = [
-    .InvalidInputValue(signal: "age", index: 0, value: "x"),
-    .UnknownSignal(name: "nope"),
-    .DuplicateSignal(name: "age"),
-    .InputSize(signal: "age", expected: 1, got: 2),
-    .MissingInputs(set: 1, expected: 2),
-    .AssertionFailed(detail: "d"),
-    .ResourceExhausted(detail: "d"),
-    .CircuitAbort(code: 7, reason: "r", detail: "d"),
-    .WitnessEngine(detail: "d"),
-    .ArtifactLoad(detail: "d"),
-    .InvalidArtifact(detail: "d"),
-    .InvalidCircuitModule(detail: "d"),
-    .UnsupportedField(detail: "d"),
-    .CircuitEngine(detail: "d"),
-    .InvalidWitness(detail: "d"),
-    .ProofGeneration(detail: "d"),
-    .Internal(detail: "d"),
+/// Every LaniakeaError case, one value each. Keep in step with the SDK's enum: the
+/// exhaustive switch in `caseName` fails to compile if a case is added.
+let allSDKErrors: [LaniakeaError] = [
+    .fileUnreadable(file: "age_check.wasm", reason: "gone"),
+    .invalidArtifact(detail: "d"),
+    .invalidCircuit(detail: "d"),
+    .invalidInputValue(signal: "age", index: 0, value: "x"),
+    .unknownInput(name: "nope"),
+    .duplicateInput(name: "age"),
+    .wrongInputCount(signal: "age", expected: 1, got: 2),
+    .missingInputs(provided: 1, expected: 2),
+    .circuitRejectedInputs(detail: "d"),
+    .outOfMemory(detail: "d"),
+    .provingFailed(detail: "d"),
+    .internalFailure(detail: "d"),
+    .exportFailed(file: "proof.json", reason: "full"),
 ]
 
-func caseName(_ e: ProverError) -> String {
+func caseName(_ e: LaniakeaError) -> String {
     switch e {
-    case .InvalidInputValue: "InvalidInputValue"
-    case .UnknownSignal: "UnknownSignal"
-    case .DuplicateSignal: "DuplicateSignal"
-    case .InputSize: "InputSize"
-    case .MissingInputs: "MissingInputs"
-    case .AssertionFailed: "AssertionFailed"
-    case .ResourceExhausted: "ResourceExhausted"
-    case .CircuitAbort: "CircuitAbort"
-    case .WitnessEngine: "WitnessEngine"
-    case .ArtifactLoad: "ArtifactLoad"
-    case .InvalidArtifact: "InvalidArtifact"
-    case .InvalidCircuitModule: "InvalidCircuitModule"
-    case .UnsupportedField: "UnsupportedField"
-    case .CircuitEngine: "CircuitEngine"
-    case .InvalidWitness: "InvalidWitness"
-    case .ProofGeneration: "ProofGeneration"
-    case .Internal: "Internal"
+    case .fileUnreadable: "fileUnreadable"
+    case .invalidArtifact: "invalidArtifact"
+    case .invalidCircuit: "invalidCircuit"
+    case .invalidInputValue: "invalidInputValue"
+    case .unknownInput: "unknownInput"
+    case .duplicateInput: "duplicateInput"
+    case .wrongInputCount: "wrongInputCount"
+    case .missingInputs: "missingInputs"
+    case .circuitRejectedInputs: "circuitRejectedInputs"
+    case .outOfMemory: "outOfMemory"
+    case .provingFailed: "provingFailed"
+    case .internalFailure: "internalFailure"
+    case .exportFailed: "exportFailed"
     }
 }
 
@@ -117,9 +110,10 @@ struct ServiceTests {
         }
         let resourcesDir = URL(fileURLWithPath: args[1])
         let outDir = URL(fileURLWithPath: args[2])
-        let artifact = try Data(contentsOf: resourcesDir.appendingPathComponent("age_check.artifact"))
-        let wasm = try Data(contentsOf: resourcesDir.appendingPathComponent("age_check.wasm"))
-        let resources = CircuitResources(artifact: artifact, wasm: wasm)
+        let resources = try Circuit(
+            artifactURL: resourcesDir.appendingPathComponent("age_check.artifact"),
+            wasmURL: resourcesDir.appendingPathComponent("age_check.wasm")
+        )
 
         try await serviceTests(resources, outDir)
         await classificationTests()
@@ -134,9 +128,9 @@ struct ServiceTests {
 
     // MARK: proving through the service
 
-    static func serviceTests(_ resources: CircuitResources, _ outDir: URL) async throws {
+    static func serviceTests(_ resources: Circuit, _ outDir: URL) async throws {
         print("service: construct + prove (threshold \(AgeProofService.threshold))")
-        let service = try AgeProofService(resources: resources)
+        let service = try await AgeProofService(circuit: resources)
 
         let eligible = try await service.prove(age: 25)
         check(eligible.eligibility == .eligible, "age 25 is classified eligible")
@@ -162,7 +156,7 @@ struct ServiceTests {
         await expectFailure("age 300 (raw path) reaches the circuit and fails its assertion", {
             _ = try await service.prove(ageDecimal: "300")
         }) {
-            guard case .prover(let e) = $0, case .AssertionFailed = e else { return false }
+            guard case .sdk(let e) = $0, case .circuitRejectedInputs = e else { return false }
             return e.category == .circuitRejected
         }
         // Characterization: the circuit does NOT range-check its inputs to 8 bits.
@@ -178,7 +172,7 @@ struct ServiceTests {
         await expectFailure("age 274 (raw path) is the first to fail the circuit assertion", {
             _ = try await service.prove(ageDecimal: "274")
         }) {
-            if case .prover(.AssertionFailed) = $0 { return true }
+            if case .sdk(.circuitRejectedInputs) = $0 { return true }
             return false
         }
         let pMinus1 = "21888242871839275222246405745257275088548364400416034343698204186575808495616"
@@ -187,7 +181,7 @@ struct ServiceTests {
         await expectFailure("a malformed decimal (raw path) is rejected by the bindings", {
             _ = try await service.prove(ageDecimal: "-1")
         }) {
-            if case .prover(.InvalidInputValue(let signal, 0, "-1")) = $0 { return signal == "age" }
+            if case .sdk(.invalidInputValue(let signal, 0, "-1")) = $0 { return signal == "age" }
             return false
         }
         let again = try await service.prove(age: 25)
@@ -237,31 +231,37 @@ struct ServiceTests {
 
     // MARK: bad bundled resources
 
-    static func resourceErrorTests(_ good: CircuitResources) async {
+    static func resourceErrorTests(_ good: Circuit) async {
         print("bad resources are classified")
         await expectFailure("invalid WASM", {
-            _ = try AgeProofService(resources: CircuitResources(artifact: good.artifact, wasm: Data([0, 1, 2, 3])))
+            _ = try await AgeProofService(circuit: Circuit(artifact: good.artifact, wasm: Data([0, 1, 2, 3])))
         }) {
-            guard case .prover(let e) = $0, case .InvalidCircuitModule = e else { return false }
+            guard case .sdk(let e) = $0, case .invalidCircuit = e else { return false }
             return e.category == .bundledResources
         }
         await expectFailure("empty artifact", {
-            _ = try AgeProofService(resources: CircuitResources(artifact: Data(), wasm: good.wasm))
+            _ = try await AgeProofService(circuit: Circuit(artifact: Data(), wasm: good.wasm))
         }) {
-            guard case .prover(let e) = $0, case .ArtifactLoad = e else { return false }
+            guard case .sdk(let e) = $0, case .invalidArtifact = e else { return false }
             return e.category == .bundledResources
         }
         await expectFailure("truncated artifact", {
-            _ = try AgeProofService(resources: CircuitResources(artifact: good.artifact.prefix(good.artifact.count / 2), wasm: good.wasm))
+            _ = try await AgeProofService(circuit: Circuit(artifact: good.artifact.prefix(good.artifact.count / 2), wasm: good.wasm))
         }) {
-            if case .prover(.ArtifactLoad) = $0 { return true }
+            if case .sdk(.invalidArtifact) = $0 { return true }
             return false
         }
         // The WASM bytes in place of the artifact, and vice versa.
         await expectFailure("swapped files", {
-            _ = try AgeProofService(resources: CircuitResources(artifact: good.wasm, wasm: good.artifact))
+            _ = try await AgeProofService(circuit: Circuit(artifact: good.wasm, wasm: good.artifact))
         }) {
-            guard case .prover(let e) = $0 else { return false }
+            guard case .sdk(let e) = $0 else { return false }
+            return e.category == .bundledResources
+        }
+        await expectFailure("a missing bundle resource", {
+            _ = try AgeProofViewModel.bundledCircuit()   // the test executable's bundle has no age_check files
+        }) {
+            guard case .sdk(let e) = $0, case .fileUnreadable = e else { return false }
             return e.category == .bundledResources
         }
     }
@@ -270,26 +270,28 @@ struct ServiceTests {
 
     static func messageTests() {
         print("user-facing messages")
-        check(allProverErrors.count == 17, "all 17 ProverError cases are listed")
-        check(Set(allProverErrors.map(caseName)).count == allProverErrors.count, "the listed cases are distinct")
+        check(allSDKErrors.count == 13, "all 13 LaniakeaError cases are listed")
+        check(Set(allSDKErrors.map(caseName)).count == allSDKErrors.count, "the listed cases are distinct")
         var messages = Set<String>()
-        for e in allProverErrors {
+        for e in allSDKErrors {
             let message = e.userMessage
-            let ok = !message.isEmpty && message.hasSuffix(".") && !message.contains("ProverError")
+            let ok = !message.isEmpty && message.hasSuffix(".") && !message.contains("LaniakeaError")
             check(ok, "\(caseName(e)) [\(e.category)]: \(message)")
-            check(e.debugDetail.hasPrefix(caseName(e)), "\(caseName(e)): debugDetail names the case")
+            check(e.debugDescription.hasPrefix(caseName(e)), "\(caseName(e)): debugDescription names the case")
             messages.insert(message)
         }
-        check(messages.count == allProverErrors.count, "every ProverError case has its own message")
+        check(messages.count == allSDKErrors.count, "every LaniakeaError case has its own message")
 
         let appErrors: [AgeProofError] = [
-            .resourceUnavailable(name: "age_check.wasm", detail: "not found"),
-            .prover(.Internal(detail: "x")), .unexpectedSignalCount(3),
-            .unexpectedSignals(.unexpectedOutput("2"), ["2", "18"]), .bindingFailure("panic"),
+            .sdk(.internalFailure(detail: "x")), .unexpectedSignalCount(3),
+            .unexpectedSignals(.unexpectedOutput("2"), ["2", "18"]),
         ]
         for e in appErrors {
             check(!e.userMessage.isEmpty && !e.debugDetail.isEmpty, "AgeProofError message: \(e.userMessage)")
         }
+        struct Foreign: Error {}
+        check(AgeProofError.wrapping(Foreign()).debugDetail.hasPrefix("internalFailure"), "an error from outside the SDK is reported as internalFailure")
+        check(AgeProofError.wrapping(LaniakeaError.unknownInput(name: "a")) == .sdk(.unknownInput(name: "a")), "an SDK error is kept as it is")
         for e in [AgeInputError.empty, .notANumber, .negative, .outOfRange] {
             check(!e.userMessage.isEmpty, "AgeInputError.\(e): \(e.userMessage)")
         }
@@ -297,9 +299,9 @@ struct ServiceTests {
 
     // MARK: view model
 
-    static func viewModelTests(_ resources: CircuitResources) async {
+    static func viewModelTests(_ resources: Circuit) async {
         print("view model")
-        let model = AgeProofViewModel(loadResources: { resources })
+        let model = AgeProofViewModel(loadCircuit: { resources })
         check(model.phase == .notLoaded && !model.canSubmit, "starts not loaded; cannot submit")
         model.ageText = "25"
         model.submit()
@@ -353,24 +355,24 @@ struct ServiceTests {
             check(false, "proof for age 10 (phase \(model.phase))")
         }
 
-        let broken = AgeProofViewModel(loadResources: { () throws(AgeProofError) -> CircuitResources in
-            throw .resourceUnavailable(name: "age_check.wasm", detail: "not found in the app bundle")
+        let broken = AgeProofViewModel(loadCircuit: { () throws(AgeProofError) -> Circuit in
+            throw .sdk(.fileUnreadable(file: "age_check.wasm", reason: "not found in the app bundle"))
         })
         broken.load()
         await broken.work?.value
-        check(broken.phase == .unavailable(.resourceUnavailable(name: "age_check.wasm", detail: "not found in the app bundle")),
+        check(broken.phase == .unavailable(.sdk(.fileUnreadable(file: "age_check.wasm", reason: "not found in the app bundle"))),
               "a missing resource makes the prover unavailable")
         broken.ageText = "25"
         broken.submit()
         check(!broken.canSubmit && broken.work == nil, "nothing can be submitted without a prover")
 
-        let badWasm = AgeProofViewModel(loadResources: { CircuitResources(artifact: resources.artifact, wasm: Data([1, 2, 3])) })
+        let badWasm = AgeProofViewModel(loadCircuit: { Circuit(artifact: resources.artifact, wasm: Data([1, 2, 3])) })
         badWasm.load()
         await badWasm.work?.value
-        if case .unavailable(.prover(.InvalidCircuitModule)) = badWasm.phase {
-            check(true, "invalid WASM -> unavailable(InvalidCircuitModule)")
+        if case .unavailable(.sdk(.invalidCircuit)) = badWasm.phase {
+            check(true, "invalid WASM -> unavailable(invalidCircuit)")
         } else {
-            check(false, "invalid WASM -> unavailable(InvalidCircuitModule) (phase \(badWasm.phase))")
+            check(false, "invalid WASM -> unavailable(invalidCircuit) (phase \(badWasm.phase))")
         }
     }
 }

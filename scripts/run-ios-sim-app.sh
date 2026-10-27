@@ -10,9 +10,10 @@
 # This is a scripted development harness, NOT the Xcode project workflow (see
 # examples/ios-age-app/README.md). It exists because there is no supported way to
 # create an .xcodeproj from the command line and `simctl` cannot tap or type. It:
-#   * compiles LaniakeaKit's Swift sources (Sources/Laniakea/laniakea.swift) as
-#     module `Laniakea`, and the app's sources against it, with swiftc for the
-#     simulator SDK (Debug: -Onone, DEBUG defined);
+#   * compiles LaniakeaKit's Swift sources as two modules, the generated binding
+#     (Sources/Laniakea/laniakea.swift, module `Laniakea`) and the handwritten SDK on top
+#     of it (Sources/LaniakeaKit, module `LaniakeaKit`), and the app's sources against
+#     them, with swiftc for the simulator SDK (Debug: -Onone, DEBUG defined);
 #   * links the Rust static library from the XCFramework's simulator slice (the
 #     real one; never a host library);
 #   * writes Info.plist, copies the two resources, ad-hoc signs the bundle;
@@ -42,7 +43,8 @@ ios_layout   # MIN, TARGET, STAGE: the package built by package-xcframework.sh
 PKG="$STAGE/LaniakeaKit"
 XCF="$PKG/laniakeaFFI.xcframework"
 BINDING="$PKG/Sources/Laniakea/laniakea.swift"
-[ -f "$PKG/Package.swift" ] && [ -f "$XCF/Info.plist" ] && [ -f "$BINDING" ] \
+SDK_SOURCES=("$PKG"/Sources/LaniakeaKit/*.swift)
+[ -f "$PKG/Package.swift" ] && [ -f "$XCF/Info.plist" ] && [ -f "$BINDING" ] && [ -f "${SDK_SOURCES[0]}" ] \
   || die "LaniakeaKit not found in $PKG; run scripts/package-xcframework.sh first"
 
 APP_SRC_DIR="$ROOT/examples/ios-age-app/AgeCheckApp"
@@ -115,6 +117,11 @@ swiftc "${COMMON[@]}" -swift-version 5 -suppress-warnings -Onone -g -module-name
   -emit-library -static -emit-module -emit-module-path "$WORK/mod/Laniakea.swiftmodule" \
   "$BINDING" -o "$WORK/libLaniakea.a"
 
+echo "==> compiling module LaniakeaKit (the SDK; Swift 5 mode, warnings are errors)"
+swiftc "${COMMON[@]}" -swift-version 5 -strict-concurrency=complete -warnings-as-errors -Onone -g -module-name LaniakeaKit \
+  -I "$WORK/mod" -emit-library -static -emit-module -emit-module-path "$WORK/mod/LaniakeaKit.swiftmodule" \
+  "${SDK_SOURCES[@]}" -o "$WORK/libLaniakeaKit.a"
+
 echo "==> type-checking the app for iOS (warnings are errors)"
 for config in "5 complete" "6 -" "6 MainActor"; do
   set -- $config
@@ -131,7 +138,7 @@ done
 echo "==> compiling and linking the app ($TRIPLE, Debug)"
 swiftc "${COMMON[@]}" -swift-version 5 -strict-concurrency=complete -warnings-as-errors -DDEBUG -Onone -g \
   -module-name AgeCheckApp -I "$WORK/mod" "${APP_SRC[@]}" \
-  -L "$WORK" -lLaniakea "$RUST_LIB" -Xlinker -dead_strip \
+  -L "$WORK" -lLaniakeaKit -lLaniakea "$RUST_LIB" -Xlinker -dead_strip \
   -o "$APP/AgeCheckApp"
 
 cat > "$APP/Info.plist" <<PLIST
@@ -198,11 +205,10 @@ echo "==> scenarios"
 fail=0
 run_scenario 25 eligible '^AGECHECK result eligible signals=\["1", "18"\] .* mainActorReleased=true ' || fail=1
 run_scenario 10 ineligible '^AGECHECK result notEligible signals=\["0", "18"\] .* mainActorReleased=true ' || fail=1
-for name in eligible ineligible; do
-  if ! grep -qx 'AGECHECK prover-call mainThread=false' "$WORK/$name.stderr"; then
-    echo "  FAIL $name: no evidence that the prover was called off the main thread"; fail=1
-  fi
-done
+# Off the main thread: `mainActorReleased=true` above is the evidence (the app's main
+# actor ran while the proof was in flight). The SDK's Prover actor owns the call, so the
+# app can no longer observe the thread of the Rust call itself; scripts/swift-sdk-test.sh
+# tests the same property on the SDK.
 run_scenario 256 out-of-range '^AGECHECK input-rejected outOfRange$' || fail=1
 run_scenario abc not-a-number '^AGECHECK input-rejected notANumber$' || fail=1
 for name in out-of-range not-a-number; do

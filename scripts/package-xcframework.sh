@@ -13,7 +13,7 @@
 # Outputs, under Cargo's target directory:
 #   <target>/uniffi/ios-<min>/laniakeaFFI.xcframework
 #   <target>/uniffi/ios-<min>/LaniakeaKit/  (Package.swift, Sources/Laniakea/laniakea.swift,
-#                                            laniakeaFFI.xcframework)
+#                                            Sources/LaniakeaKit/*.swift, laniakeaFFI.xcframework)
 # <min> is IPHONEOS_DEPLOYMENT_TARGET (default 14.0).
 set -euo pipefail
 
@@ -55,11 +55,15 @@ xcodebuild -create-xcframework \
 
 echo "==> assembling Swift package in $PKG"
 rm -rf "$PKG"
-mkdir -p "$PKG/Sources/Laniakea"
+mkdir -p "$PKG/Sources/Laniakea" "$PKG/Sources/LaniakeaKit"
 # The template carries a placeholder so the manifest's platform matches the
 # deployment target the libraries were actually built for.
 sed "s/@IOS_MIN@/$MIN/g" "$ROOT/swift/LaniakeaKit/Package.swift.template" > "$PKG/Package.swift"
 grep -q '@IOS_MIN@' "$PKG/Package.swift" && die "unsubstituted placeholder in Package.swift"
 cp "$BIND/laniakea.swift" "$PKG/Sources/Laniakea/laniakea.swift"
+# The handwritten Swift layer (checked in) next to the generated binding it wraps.
+SDK_SRC="$ROOT/swift/LaniakeaKit/Sources/LaniakeaKit"
+ls "$SDK_SRC"/*.swift >/dev/null 2>&1 || die "no Swift sources in $SDK_SRC"
+cp "$SDK_SRC"/*.swift "$PKG/Sources/LaniakeaKit/"
 cp -R "$XCF" "$PKG/laniakeaFFI.xcframework"
 echo "==> OK: add $PKG as a local Swift package dependency in Xcode"

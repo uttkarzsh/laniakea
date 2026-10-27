@@ -1,6 +1,8 @@
 // Application logic for the age-check demo: no SwiftUI and no Bundle access.
-// Callers hand in the proving artifact and the circuit WASM as Data, so the same
-// code runs in the app and in the macOS logic test (Tests-macOS/).
+// Callers hand in a `Circuit` (the proving artifact and the circuit WASM), so the
+// same code runs in the app and in the macOS logic test (Tests-macOS/). Everything
+// that talks to the Rust prover goes through the LaniakeaKit SDK (Circuit, Prover,
+// Proof, LaniakeaError); this file only knows the age_check circuit.
 //
 // What a result means: the circuit's public signals are [out, threshold], where
 // out = 1 if age >= threshold and 0 otherwise. The circuit does NOT constrain
@@ -15,7 +17,7 @@
 // before anything reaches the prover.
 
 import Foundation
-import Laniakea
+import LaniakeaKit
 
 /// Why the text typed into the age field cannot be sent to the prover.
 nonisolated enum AgeInputError: Error, Equatable, Sendable {
@@ -54,39 +56,29 @@ nonisolated struct AgeProof: Equatable, Sendable {
     let seconds: Double
 }
 
-/// Everything that can go wrong between "resources in hand" and "classified proof".
+/// Everything that can go wrong between "circuit in hand" and "classified proof".
 nonisolated enum AgeProofError: Error, Equatable, Sendable {
-    /// A bundled resource could not be found or read (`name`, then why).
-    case resourceUnavailable(name: String, detail: String)
-    /// The Rust prover reported a typed error.
-    case prover(ProverError)
+    /// The SDK reported a typed error: loading the circuit's files, the artifact or
+    /// WASM, the inputs, the circuit itself, or proving.
+    case sdk(LaniakeaError)
     /// The loaded circuit does not have the two public signals this app expects.
     case unexpectedSignalCount(Int)
     /// A proof was generated but its public signals are not a valid answer.
     case unexpectedSignals(SignalError, [String])
-    /// An error outside `ProverError` from the generated bindings (for example a
-    /// Rust panic surfaced by UniFFI). Should not happen.
-    case bindingFailure(String)
+
+    /// An error from the SDK, as an `AgeProofError`. Everything the SDK throws is a
+    /// `LaniakeaError`; anything else is reported as an internal failure.
+    static func wrapping(_ error: any Error) -> AgeProofError {
+        .sdk(error as? LaniakeaError ?? .internalFailure(detail: String(describing: error)))
+    }
 }
 
-/// The two files the prover is built from.
-nonisolated struct CircuitResources: Sendable {
-    let artifact: Data
-    let wasm: Data
-}
-
-/// Owns one Rust prover for the age_check circuit.
+/// Proves age_check statements through the SDK's `Prover`.
 ///
-/// Concurrency: an actor, so the non-Sendable `LaniakeaProver` is created inside
-/// it and never leaves it. No `@unchecked Sendable` is needed: all calls into the
-/// prover happen on this actor's executor, one at a time, and never on the main
-/// thread. (The Rust object would tolerate concurrent calls, being `Send + Sync`
-/// with `prove(&self)`, but nothing here relies on that.)
-///
-/// `prove` blocks its executor thread for the duration of the proof: the Rust call
-/// cannot yield. That is CPU-bound work, which the cooperative pool is meant for;
-/// pinning it to a dedicated thread would need a custom actor executor (iOS 17+).
-actor AgeProofService {
+/// Concurrency: `Prover` is an actor, so the proof runs on its executor, one at a time
+/// and never on the main thread, and nothing here needs `@unchecked Sendable`. This
+/// type only holds the prover and the demo's constants.
+nonisolated struct AgeProofService: Sendable {
     /// Fixed by this demo: the user only enters an age.
     static let threshold: UInt8 = 18
     /// The circuit compares 8-bit numbers (`GreaterEqThan(8)`), whose result is
@@ -95,65 +87,54 @@ actor AgeProofService {
     /// age_check's public signals: `[out, threshold]`.
     static let expectedPublicSignals = 2
 
-    private let prover: LaniakeaProver
+    private let prover: Prover
 
-    /// Validates the artifact and compiles the WASM: real work, so construct off
-    /// the main thread (this initializer runs on the caller's thread).
-    init(resources: CircuitResources) throws(AgeProofError) {
-        let prover: LaniakeaProver
+    /// Validates the artifact and compiles the WASM: real work, which `Prover` does off
+    /// the caller's thread.
+    init(circuit: Circuit) async throws(AgeProofError) {
+        let prover: Prover
         do {
-            prover = try LaniakeaProver(artifactBytes: resources.artifact, wasmBytes: resources.wasm)
-        } catch let error as ProverError {
-            throw .prover(error)
+            prover = try await Prover(circuit: circuit)
         } catch {
-            throw .bindingFailure(String(describing: error))
+            throw .wrapping(error)
         }
-        let count = Int(prover.numPublicSignals())
-        guard count == Self.expectedPublicSignals else {
-            throw .unexpectedSignalCount(count)
+        guard prover.publicSignalCount == Self.expectedPublicSignals else {
+            throw .unexpectedSignalCount(prover.publicSignalCount)
         }
         self.prover = prover
     }
 
     /// Generate a proof that `age >= threshold` or that it is not, and classify it.
-    func prove(age: UInt8) throws(AgeProofError) -> AgeProof {
-        try prove(ageDecimal: String(age))
+    func prove(age: UInt8) async throws(AgeProofError) -> AgeProof {
+        try await prove(ageDecimal: String(age))
     }
 
     /// Sends `ageDecimal` to the prover as is, bypassing the app's range check.
     /// Internal so that the logic test can show what the circuit itself does with
     /// out-of-range values (see the file comment); the app only calls `prove(age:)`.
-    func prove(ageDecimal: String) throws(AgeProofError) -> AgeProof {
-        // Structurally guaranteed by actor isolation; checked because blocking the
-        // main thread here would freeze the UI.
-        dispatchPrecondition(condition: .notOnQueue(.main))
-        debugTrace("prover-call mainThread=\(Thread.isMainThread)")
-
-        let inputs = [
-            CircuitInput(name: "age", values: [ageDecimal]),
-            CircuitInput(name: "threshold", values: [String(Self.threshold)]),
-        ]
+    func prove(ageDecimal: String) async throws(AgeProofError) -> AgeProof {
         let start = DispatchTime.now().uptimeNanoseconds
-        let result: ProofResult
+        let proof: Proof
         do {
-            result = try prover.prove(inputs: inputs)
-        } catch let error as ProverError {
-            throw .prover(error)
+            proof = try await prover.prove([
+                "age": .decimal(ageDecimal),
+                "threshold": .integer(Int(Self.threshold)),
+            ])
         } catch {
-            throw .bindingFailure(String(describing: error))
+            throw .wrapping(error)
         }
         let seconds = Double(DispatchTime.now().uptimeNanoseconds - start) / 1e9
 
-        switch Self.classify(publicSignals: result.publicSignals) {
+        switch Self.classify(publicSignals: proof.publicSignals) {
         case .success(let eligibility):
             return AgeProof(
                 eligibility: eligibility,
-                publicSignals: result.publicSignals,
-                proofJson: result.proofJson,
+                publicSignals: proof.publicSignals,
+                proofJson: proof.proofJSON,
                 seconds: seconds
             )
         case .failure(let error):
-            throw .unexpectedSignals(error, result.publicSignals)
+            throw .unexpectedSignals(error, proof.publicSignals)
         }
     }
 
@@ -208,7 +189,7 @@ actor AgeProofService {
     }
 }
 
-// MARK: - Messages for the app's own errors (ProverError's are in ProverError+Message.swift)
+// MARK: - Messages for the app's own errors (LaniakeaError's are in ProverError+Message.swift)
 
 nonisolated extension AgeInputError {
     var userMessage: String {
@@ -224,32 +205,24 @@ nonisolated extension AgeInputError {
 nonisolated extension AgeProofError {
     var userMessage: String {
         switch self {
-        case .resourceUnavailable(let name, _):
-            "The bundled file \(name) is missing or unreadable. Rebuild the app with its resources."
-        case .prover(let error):
+        case .sdk(let error):
             error.userMessage
         case .unexpectedSignalCount(let count):
             "The bundled circuit has \(count) public signals; this app expects \(AgeProofService.expectedPublicSignals). The resources do not match the app."
         case .unexpectedSignals:
             "The prover returned public signals this app does not accept, so the result was discarded."
-        case .bindingFailure:
-            "An unexpected error occurred while calling the prover."
         }
     }
 
     /// Diagnostic text for the details section. For people, not for parsing.
     var debugDetail: String {
         switch self {
-        case .resourceUnavailable(let name, let detail):
-            "\(name): \(detail)"
-        case .prover(let error):
-            error.debugDetail
+        case .sdk(let error):
+            error.debugDescription
         case .unexpectedSignalCount(let count):
             "numPublicSignals() == \(count)"
         case .unexpectedSignals(let error, let signals):
             "\(error); publicSignals = \(signals)"
-        case .bindingFailure(let detail):
-            detail
         }
     }
 }

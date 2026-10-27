@@ -8,9 +8,10 @@
 #
 # Steps:
 #   1. checks the bundled resources (prepare-ios-app-resources.sh --check);
-#   2. builds the generated bindings as a separate `Laniakea` module, in Swift 5
-#      mode, as the LaniakeaKit package does, so the app code is compiled across
-#      a real module boundary with `import Laniakea`;
+#   2. builds the generated bindings as a separate `Laniakea` module and the SDK
+#      (swift/LaniakeaKit/Sources/LaniakeaKit) as module `LaniakeaKit` on top of it, in
+#      Swift 5 mode, as the LaniakeaKit package does, so the app code is compiled across
+#      a real module boundary with `import LaniakeaKit`;
 #   3. type-checks the app logic with warnings as errors in three configurations
 #      an Xcode app target may use: Swift 5 + complete concurrency checking,
 #      Swift 6, and Swift 6 with MainActor default isolation;
@@ -51,6 +52,15 @@ swiftc -swift-version 5 -parse-as-library -suppress-warnings -module-name Laniak
   -Xcc -fmodule-map-file="$BIND/laniakeaFFI.modulemap" -I "$BIND" \
   "$BIND/laniakea.swift" -o "$WORK/libLaniakea.a"
 
+SDK_SOURCES=("$ROOT"/swift/LaniakeaKit/Sources/LaniakeaKit/*.swift)
+[ -f "${SDK_SOURCES[0]}" ] || die "no Swift sources in swift/LaniakeaKit/Sources/LaniakeaKit"
+
+echo "==> building the SDK as module LaniakeaKit (Swift 5 mode)"
+swiftc -swift-version 5 -strict-concurrency=complete -warnings-as-errors -parse-as-library -module-name LaniakeaKit \
+  -emit-library -static -emit-module -emit-module-path "$WORK/mod/LaniakeaKit.swiftmodule" \
+  -I "$WORK/mod" -Xcc -fmodule-map-file="$BIND/laniakeaFFI.modulemap" -I "$BIND" \
+  "${SDK_SOURCES[@]}" -o "$WORK/libLaniakeaKit.a"
+
 LOGIC=(
   "$APP/AgeCheckApp/AgeProofService.swift"
   "$APP/AgeCheckApp/ProverError+Message.swift"
@@ -75,7 +85,7 @@ done
 echo "==> building the tests (Swift 5, complete concurrency checking, DEBUG)"
 swiftc -swift-version 5 -strict-concurrency=complete -warnings-as-errors -DDEBUG "${IMPORTS[@]}" \
   "${LOGIC[@]}" \
-  -L "$WORK" -lLaniakea -L "$LIBDIR" -llaniakea_uniffi -Xlinker -rpath -Xlinker "$LIBDIR" \
+  -L "$WORK" -lLaniakeaKit -lLaniakea -L "$LIBDIR" -llaniakea_uniffi -Xlinker -rpath -Xlinker "$LIBDIR" \
   -o "$WORK/ServiceTests"
 
 echo "==> running"

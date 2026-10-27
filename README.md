@@ -45,7 +45,7 @@ The Rust proving pipeline, the UniFFI/Swift bindings, the iOS packaging scripts 
 ```
 SwiftUI app (examples/ios-age-app)
         ↓
- Swift package LaniakeaKit (`import Laniakea`)
+ Swift package LaniakeaKit (`import LaniakeaKit`: Circuit, Prover, Proof, LaniakeaError)
         ↓
  UniFFI  (laniakea-uniffi: LaniakeaProver)
         ↓
@@ -311,10 +311,13 @@ scripts/
 ├── build-ios.sh                  # Build + verify iOS static libraries
 ├── package-xcframework.sh        # XCFramework + LaniakeaKit Swift package
 ├── prepare-ios-app-resources.sh  # Copy/verify the demo app's resources
+├── swift-sdk-test.sh             # macOS tests for the LaniakeaKit Swift API
 ├── swift-app-logic-test.sh       # macOS logic tests for the demo app
 └── run-ios-sim-app.sh            # Scripted simulator build/run harness
 
-swift/LaniakeaKit/                # Package.swift template (package is generated under target/)
+swift/LaniakeaKit/                # Package.swift template, the handwritten Swift API
+│                                 # (Sources/LaniakeaKit) and its tests; the package itself is
+│                                 # assembled under target/
 
 circuits/
 └── age_check/
@@ -464,6 +467,7 @@ scripts/swift-smoke.sh
 
 # Demo app: resources, logic tests (macOS), iOS package (needs Xcode)
 scripts/prepare-ios-app-resources.sh --check
+scripts/swift-sdk-test.sh
 scripts/swift-app-logic-test.sh
 scripts/package-xcframework.sh
 
