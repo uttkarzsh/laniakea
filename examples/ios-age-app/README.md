@@ -30,6 +30,8 @@ stays on the device. The app makes no network requests.
   fails an assertion from 274 on, and proves a field element near the modulus (a
   "negative" age) with `out = 0`. The logic test records this behaviour. The app rejects
   empty, non-numeric, negative and out-of-range input before calling Rust.
+- The age is self-asserted and proofs are replayable; see the root README's *Security
+  Model* section for what a proof does and does not establish.
 - Nothing here is audited, and simulator results say nothing about device performance.
 
 ## Layout
