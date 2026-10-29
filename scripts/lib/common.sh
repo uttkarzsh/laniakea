@@ -28,14 +28,14 @@ norm_ver() {
 }
 
 # Paths for the iOS build with deployment target $IPHONEOS_DEPLOYMENT_TARGET
-# (default 14.0). Sets MIN, TARGET, IOS_TARGET_DIR, STAGE.
+# (default 15.0). Sets MIN, TARGET, IOS_TARGET_DIR, STAGE.
 #
 # Cargo does not rebuild when IPHONEOS_DEPLOYMENT_TARGET changes, so every
 # deployment target gets its own Cargo target directory: objects built for
 # different minimum versions can never end up in one archive, and an ordinary
 # build in the default target directory cannot contaminate a packaging build.
 ios_layout() {
-  MIN="$(norm_ver "${IPHONEOS_DEPLOYMENT_TARGET:-14.0}")"
+  MIN="$(norm_ver "${IPHONEOS_DEPLOYMENT_TARGET:-15.0}")"
   TARGET="$(target_dir)"
   IOS_TARGET_DIR="$TARGET/ios-$MIN"
   STAGE="$TARGET/uniffi/ios-$MIN"

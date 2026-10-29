@@ -1,5 +1,5 @@
 import Foundation
-import Laniakea
+internal import _LaniakeaBindings
 
 /// The values of one circuit input signal.
 ///

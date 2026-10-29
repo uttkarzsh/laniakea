@@ -14,3 +14,8 @@ node_modules/
 # Xcode per-user state
 xcuserdata/
 *.xcuserstate
+
+# Local build of the Rust static libraries as an XCFramework (see Package.swift)
+/Binaries/
+.build/
+.swiftpm/

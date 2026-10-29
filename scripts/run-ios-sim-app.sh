@@ -3,7 +3,7 @@
 # and drive it through four scenarios, checking what the app reports.
 #
 # Usage:
-#   scripts/package-xcframework.sh        # first: builds laniakeaFFI.xcframework + LaniakeaKit
+#   scripts/package-xcframework.sh        # first: builds Binaries/laniakeaFFI.xcframework
 #   scripts/run-ios-sim-app.sh            # uses the one booted simulator
 #   SIM_DEVICE=<udid> scripts/run-ios-sim-app.sh
 #
@@ -11,8 +11,8 @@
 # examples/ios-age-app/README.md). It exists because there is no supported way to
 # create an .xcodeproj from the command line and `simctl` cannot tap or type. It:
 #   * compiles LaniakeaKit's Swift sources as two modules, the generated binding
-#     (Sources/Laniakea/laniakea.swift, module `Laniakea`) and the handwritten SDK on top
-#     of it (Sources/LaniakeaKit, module `LaniakeaKit`), and the app's sources against
+#     (Sources/_LaniakeaBindings/laniakea.swift, module `_LaniakeaBindings`) and the
+#     handwritten SDK on top of it (Sources/LaniakeaKit, module `LaniakeaKit`), and the app's sources against
 #     them, with swiftc for the simulator SDK (Debug: -Onone, DEBUG defined);
 #   * links the Rust static library from the XCFramework's simulator slice (the
 #     real one; never a host library);
@@ -40,12 +40,13 @@ done
 xcodebuild -version >/dev/null 2>&1 || die "xcodebuild is not usable (full Xcode is required)"
 
 ios_layout   # MIN, TARGET, STAGE: the package built by package-xcframework.sh
-PKG="$STAGE/LaniakeaKit"
-XCF="$PKG/laniakeaFFI.xcframework"
-BINDING="$PKG/Sources/Laniakea/laniakea.swift"
-SDK_SOURCES=("$PKG"/Sources/LaniakeaKit/*.swift)
-[ -f "$PKG/Package.swift" ] && [ -f "$XCF/Info.plist" ] && [ -f "$BINDING" ] && [ -f "${SDK_SOURCES[0]}" ] \
-  || die "LaniakeaKit not found in $PKG; run scripts/package-xcframework.sh first"
+XCF="$ROOT/Binaries/laniakeaFFI.xcframework"
+KIT_SRC="$ROOT/swift/LaniakeaKit/Sources"
+BINDING="$KIT_SRC/_LaniakeaBindings/laniakea.swift"
+C_HEADERS="$KIT_SRC/laniakeaFFI/include"
+SDK_SOURCES=("$KIT_SRC"/LaniakeaKit/*.swift)
+[ -f "$ROOT/Package.swift" ] && [ -f "$XCF/Info.plist" ] && [ -f "$BINDING" ] && [ -f "$C_HEADERS/laniakeaFFI.h" ] && [ -f "${SDK_SOURCES[0]}" ] \
+  || die "the package is not ready (missing $XCF or the committed sources); run scripts/package-xcframework.sh first"
 
 APP_SRC_DIR="$ROOT/examples/ios-age-app/AgeCheckApp"
 APP_MIN="${APP_DEPLOYMENT_TARGET:-16.0}"   # SwiftUI APIs used need iOS 16
@@ -71,15 +72,13 @@ for lib in info["AvailableLibraries"]:
             and "arm64" in lib.get("SupportedArchitectures", [])):
         base = os.path.join(os.path.dirname(path), lib["LibraryIdentifier"])
         print(os.path.join(base, lib["LibraryPath"]))
-        print(os.path.join(base, lib["HeadersPath"]))
         break
 else:
     sys.exit("no arm64 iOS simulator slice in " + path)
 PY
 )" || die "could not read the XCFramework's Info.plist"
 RUST_LIB="$(sed -n 1p <<<"$SLICE")"
-HEADERS="$(sed -n 2p <<<"$SLICE")"
-[ -f "$RUST_LIB" ] && [ -f "$HEADERS/module.modulemap" ] || die "simulator slice is incomplete: $RUST_LIB"
+[ -f "$RUST_LIB" ] || die "simulator slice is incomplete: $RUST_LIB"
 echo "==> simulator slice: $RUST_LIB ($(lipo -archs "$RUST_LIB"))"
 
 # --- device
@@ -103,7 +102,14 @@ echo "==> simulator: $DEV_NAME ($DEV_RUNTIME, $UDID)"
 rm -rf "$WORK"
 mkdir -p "$WORK/mod" "$APP"
 
-COMMON=(-target "$TRIPLE" -sdk "$SDK" -parse-as-library -Xcc -fmodule-map-file="$HEADERS/module.modulemap" -I "$HEADERS")
+# The C target's module map, as SwiftPM derives it from the header (the XCFramework has none).
+cat > "$WORK/laniakeaFFI.modulemap" <<MAP
+module laniakeaFFI {
+    umbrella header "$C_HEADERS/laniakeaFFI.h"
+    export *
+}
+MAP
+COMMON=(-target "$TRIPLE" -sdk "$SDK" -parse-as-library -Xcc -fmodule-map-file="$WORK/laniakeaFFI.modulemap" -I "$C_HEADERS")
 APP_SRC=(
   "$APP_SRC_DIR/AgeCheckApp.swift"
   "$APP_SRC_DIR/ContentView.swift"
@@ -112,10 +118,10 @@ APP_SRC=(
   "$APP_SRC_DIR/ProverError+Message.swift"
 )
 
-echo "==> compiling module Laniakea from LaniakeaKit (Swift 5 mode, as its manifest says)"
-swiftc "${COMMON[@]}" -swift-version 5 -suppress-warnings -Onone -g -module-name Laniakea \
-  -emit-library -static -emit-module -emit-module-path "$WORK/mod/Laniakea.swiftmodule" \
-  "$BINDING" -o "$WORK/libLaniakea.a"
+echo "==> compiling module _LaniakeaBindings (Swift 5 mode, as its manifest says)"
+swiftc "${COMMON[@]}" -swift-version 5 -suppress-warnings -Onone -g -module-name _LaniakeaBindings \
+  -emit-library -static -emit-module -emit-module-path "$WORK/mod/_LaniakeaBindings.swiftmodule" \
+  "$BINDING" -o "$WORK/lib_LaniakeaBindings.a"
 
 echo "==> compiling module LaniakeaKit (the SDK; Swift 5 mode, warnings are errors)"
 swiftc "${COMMON[@]}" -swift-version 5 -strict-concurrency=complete -warnings-as-errors -Onone -g -module-name LaniakeaKit \
@@ -138,7 +144,7 @@ done
 echo "==> compiling and linking the app ($TRIPLE, Debug)"
 swiftc "${COMMON[@]}" -swift-version 5 -strict-concurrency=complete -warnings-as-errors -DDEBUG -Onone -g \
   -module-name AgeCheckApp -I "$WORK/mod" "${APP_SRC[@]}" \
-  -L "$WORK" -lLaniakeaKit -lLaniakea "$RUST_LIB" -Xlinker -dead_strip \
+  -L "$WORK" -lLaniakeaKit -l_LaniakeaBindings "$RUST_LIB" -Xlinker -dead_strip \
   -o "$APP/AgeCheckApp"
 
 cat > "$APP/Info.plist" <<PLIST

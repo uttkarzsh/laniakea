@@ -135,7 +135,7 @@
 			mainGroup = A116A748308F5223006A1B03;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				A116A76F308F54F6006A1B03 /* XCLocalSwiftPackageReference "../../../target/uniffi/ios-14.0/LaniakeaKit" */,
+				A116A76F308F54F6006A1B03 /* XCLocalSwiftPackageReference "../../.." */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A116A752308F5223006A1B03 /* Products */;
@@ -376,9 +376,9 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		A116A76F308F54F6006A1B03 /* XCLocalSwiftPackageReference "../../../target/uniffi/ios-14.0/LaniakeaKit" */ = {
+		A116A76F308F54F6006A1B03 /* XCLocalSwiftPackageReference "../../.." */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = "../../../target/uniffi/ios-14.0/LaniakeaKit";
+			relativePath = "../../..";
 		};
 /* End XCLocalSwiftPackageReference section */
 

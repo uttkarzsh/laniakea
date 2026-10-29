@@ -5,7 +5,7 @@
 # Usage:
 #   scripts/build-ios.sh                       # device (arm64) + simulator (arm64)
 #   INCLUDE_X86_64_SIM=1 scripts/build-ios.sh  # also the Intel simulator (x86_64)
-#   IPHONEOS_DEPLOYMENT_TARGET=15.0 scripts/build-ios.sh   # default 14.0
+#   IPHONEOS_DEPLOYMENT_TARGET=16.0 scripts/build-ios.sh   # default 15.0
 #
 # Build artifacts for deployment target X live in their own Cargo target directory,
 # <cargo target dir>/ios-X, because cargo does not rebuild when the variable changes.

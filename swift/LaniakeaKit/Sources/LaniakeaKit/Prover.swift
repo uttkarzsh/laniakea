@@ -1,5 +1,5 @@
 import Foundation
-import Laniakea
+internal import _LaniakeaBindings
 
 /// Generates Groth16 proofs for one Circom circuit, on the device, with Wasmi
 /// executing the circuit's WASM. The SDK itself makes no network calls: what happens to

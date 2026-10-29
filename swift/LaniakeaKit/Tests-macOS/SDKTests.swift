@@ -10,7 +10,7 @@
 //          Proof.write, so the exported files are what an independent verifier checks.
 
 import Foundation
-import Laniakea
+import _LaniakeaBindings
 @testable import LaniakeaKit
 
 @MainActor var failures = 0

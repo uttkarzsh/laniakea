@@ -164,10 +164,11 @@ Finally snarkjs verifies the eligible proof and the (valid) ineligible proof.
 
 ```sh
 scripts/package-xcframework.sh
-# -> target/uniffi/ios-14.0/LaniakeaKit/  (Package.swift, Sources/Laniakea, Sources/LaniakeaKit, laniakeaFFI.xcframework)
+# -> Binaries/laniakeaFFI.xcframework (used by the repository's root Package.swift) and the
+#    committed generated sources, refreshed
 ```
 
-The package's minimum is iOS 14 (`IPHONEOS_DEPLOYMENT_TARGET`). The app needs iOS 16+
+The package declares iOS 15.0 (`IPHONEOS_DEPLOYMENT_TARGET`; see swift/LaniakeaKit/README.md for what has actually been run). The app needs iOS 16+
 for its SwiftUI APIs. Rebuild the package after any Rust or UniFFI change.
 
 ## 4. Simulator, scripted
@@ -211,14 +212,12 @@ created with Xcode's iOS App template, not hand-written.
 | Scheme | `AgeCheckDemo`, shared (`AgeCheckDemo.xcodeproj/xcshareddata/xcschemes/AgeCheckDemo.xcscheme`). |
 | Target sources | The five files in `examples/ios-age-app/AgeCheckApp/`, referenced in place (not copied). The template's own Swift files were removed; only `AgeCheckDemo/Assets.xcassets` remains from the template. |
 | Bundle resources | `age_check.wasm` and `age_check.artifact` (Copy Bundle Resources). |
-| Package dependency | The local package `../../../target/uniffi/ios-14.0/LaniakeaKit` (relative to the project directory). The app links its product `LaniakeaKit` and uses `import LaniakeaKit`. |
+| Package dependency | The repository's root package, `../../..` (relative to the project directory). The app links its product `LaniakeaKit` and uses `import LaniakeaKit`. |
 | Settings | Deployment target iOS 16.0; the Swift and concurrency settings in Concurrency above; bundle identifier `dev.laniakea.AgeCheckDemo`; automatic signing with no development team (see Signing below). |
 | Debug vs Release | Debug defines `DEBUG`. Release does not, so `LaunchOptions` and the `AGECHECK` trace are compiled out. |
 
-The package lives in the generated, git-ignored `target/` directory, so after a fresh
-checkout **run steps 1 and 3 before opening the project**. The path assumes Cargo's
-default target directory and `IPHONEOS_DEPLOYMENT_TARGET=14.0`. With a different
-`CARGO_TARGET_DIR` or deployment target, re-add the package from its actual location.
+The package needs `Binaries/laniakeaFFI.xcframework`, which is git-ignored, so after a
+fresh checkout **run steps 1 and 3 before opening the project**.
 
 **Signing:** the project contains no development team ID and no signing identity
 (`CODE_SIGN_STYLE = Automatic`, `DEVELOPMENT_TEAM` unset), so the simulator builds and the
@@ -341,9 +340,8 @@ read from the screenshots.
      if they're missing. Without them the app shows "Prover unavailable" and names the
      missing file.
 6. File → Add Package Dependencies… → **Add Local…** → select
-   `target/uniffi/ios-14.0/LaniakeaKit` → add the product **LaniakeaKit** to the
-   AgeCheckDemo target. The project stores a relative path into `target/`, so keep that
-   layout or re-add the package after moving it.
+   the repository root (the folder with `Package.swift`) → add the product **LaniakeaKit**
+   to the AgeCheckDemo target.
 7. Target → General → Minimum Deployments: **iOS 16.0** or later. Use Swift 5 language
    mode, MainActor default isolation and Approachable Concurrency, the configuration
    verified above.

@@ -1,5 +1,5 @@
 import Foundation
-import Laniakea
+internal import _LaniakeaBindings
 
 /// Everything Laniakea can throw. Every error from `Circuit`, `Prover` and `Proof`
 /// is a `LaniakeaError`, except `CancellationError` when the calling task was

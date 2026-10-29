@@ -7,7 +7,7 @@
 #   REQUIRE_SNARKJS=1 scripts/swift-sdk-test.sh  # strict (CI): a missing snarkjs is an error
 #
 # Steps:
-#   1. builds the generated bindings as module `Laniakea` and the Swift layer as module
+#   1. builds the generated bindings as module `_LaniakeaBindings` and the Swift layer as module
 #      `LaniakeaKit` (Swift 5 mode, as the package's manifest says; the layer with
 #      testing enabled so the tests can reach its internal mapping code);
 #   2. type-checks the layer, warnings as errors, in the language modes an app may use:
@@ -49,12 +49,12 @@ SOURCES=("$KIT"/Sources/LaniakeaKit/*.swift)
 [ -f "${SOURCES[0]}" ] || die "no Swift sources in $KIT/Sources/LaniakeaKit"
 IMPORTS=(-I "$WORK/mod" -Xcc -fmodule-map-file="$BIND/laniakeaFFI.modulemap" -I "$BIND")
 
-echo "==> building the bindings as module Laniakea (Swift 5 mode)"
+echo "==> building the bindings as module _LaniakeaBindings (Swift 5 mode)"
 # Generated code: its warnings are UniFFI's, not ours.
-swiftc -swift-version 5 -parse-as-library -suppress-warnings -module-name Laniakea \
-  -emit-library -static -emit-module -emit-module-path "$WORK/mod/Laniakea.swiftmodule" \
+swiftc -swift-version 5 -parse-as-library -suppress-warnings -module-name _LaniakeaBindings \
+  -emit-library -static -emit-module -emit-module-path "$WORK/mod/_LaniakeaBindings.swiftmodule" \
   -Xcc -fmodule-map-file="$BIND/laniakeaFFI.modulemap" -I "$BIND" \
-  "$BIND/laniakea.swift" -o "$WORK/libLaniakea.a"
+  "$BIND/laniakea.swift" -o "$WORK/lib_LaniakeaBindings.a"
 
 echo "==> type-checking LaniakeaKit (warnings are errors)"
 for config in "5 complete" "6 -"; do
@@ -74,7 +74,7 @@ swiftc -swift-version 5 -strict-concurrency=complete -warnings-as-errors -parse-
 echo "==> building the tests (Swift 5, complete concurrency checking)"
 swiftc -swift-version 5 -strict-concurrency=complete -warnings-as-errors -parse-as-library \
   "${IMPORTS[@]}" "$KIT/Tests-macOS/SDKTests.swift" \
-  -L "$WORK" -lLaniakeaKit -lLaniakea -L "$LIBDIR" -llaniakea_uniffi -Xlinker -rpath -Xlinker "$LIBDIR" \
+  -L "$WORK" -lLaniakeaKit -l_LaniakeaBindings -L "$LIBDIR" -llaniakea_uniffi -Xlinker -rpath -Xlinker "$LIBDIR" \
   -o "$WORK/SDKTests"
 
 echo "==> running"

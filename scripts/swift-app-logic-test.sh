@@ -8,7 +8,7 @@
 #
 # Steps:
 #   1. checks the bundled resources (prepare-ios-app-resources.sh --check);
-#   2. builds the generated bindings as a separate `Laniakea` module and the SDK
+#   2. builds the generated bindings as a separate `_LaniakeaBindings` module and the SDK
 #      (swift/LaniakeaKit/Sources/LaniakeaKit) as module `LaniakeaKit` on top of it, in
 #      Swift 5 mode, as the LaniakeaKit package does, so the app code is compiled across
 #      a real module boundary with `import LaniakeaKit`;
@@ -45,12 +45,12 @@ echo "==> checking the bundled resources"
 rm -rf "$WORK"
 mkdir -p "$WORK/mod" "$WORK/out"
 
-echo "==> building the bindings as module Laniakea (Swift 5 mode)"
+echo "==> building the bindings as module _LaniakeaBindings (Swift 5 mode)"
 # Generated code: its warnings are UniFFI's, not ours.
-swiftc -swift-version 5 -parse-as-library -suppress-warnings -module-name Laniakea \
-  -emit-library -static -emit-module -emit-module-path "$WORK/mod/Laniakea.swiftmodule" \
+swiftc -swift-version 5 -parse-as-library -suppress-warnings -module-name _LaniakeaBindings \
+  -emit-library -static -emit-module -emit-module-path "$WORK/mod/_LaniakeaBindings.swiftmodule" \
   -Xcc -fmodule-map-file="$BIND/laniakeaFFI.modulemap" -I "$BIND" \
-  "$BIND/laniakea.swift" -o "$WORK/libLaniakea.a"
+  "$BIND/laniakea.swift" -o "$WORK/lib_LaniakeaBindings.a"
 
 SDK_SOURCES=("$ROOT"/swift/LaniakeaKit/Sources/LaniakeaKit/*.swift)
 [ -f "${SDK_SOURCES[0]}" ] || die "no Swift sources in swift/LaniakeaKit/Sources/LaniakeaKit"
@@ -85,7 +85,7 @@ done
 echo "==> building the tests (Swift 5, complete concurrency checking, DEBUG)"
 swiftc -swift-version 5 -strict-concurrency=complete -warnings-as-errors -DDEBUG "${IMPORTS[@]}" \
   "${LOGIC[@]}" \
-  -L "$WORK" -lLaniakeaKit -lLaniakea -L "$LIBDIR" -llaniakea_uniffi -Xlinker -rpath -Xlinker "$LIBDIR" \
+  -L "$WORK" -lLaniakeaKit -l_LaniakeaBindings -L "$LIBDIR" -llaniakea_uniffi -Xlinker -rpath -Xlinker "$LIBDIR" \
   -o "$WORK/ServiceTests"
 
 echo "==> running"
