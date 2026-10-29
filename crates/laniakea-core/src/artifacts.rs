@@ -7,6 +7,71 @@ use ark_relations::r1cs::ConstraintMatrices;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::vec::Vec;
 
+/// The 8 magic bytes that start every `.artifact` file: `\x89LNKART\n`. The
+/// non-ASCII first byte keeps a text file from matching; the final newline catches
+/// line-ending conversion.
+pub const ARTIFACT_MAGIC: [u8; 8] = [0x89, b'L', b'N', b'K', b'A', b'R', b'T', 0x0A];
+/// The artifact format version this build reads and writes. It defines the whole
+/// payload encoding (see `docs/ARTIFACT_FORMAT.md`).
+pub const ARTIFACT_FORMAT_VERSION: u16 = 1;
+/// Header length: magic (8) + version u16 LE (2) + payload length u64 LE (8).
+pub const ARTIFACT_HEADER_LEN: usize = 18;
+
+/// Checks the fixed 18-byte header of an `.artifact` file and returns the payload.
+///
+/// Everything here is constant-time and allocation-free: the declared payload length
+/// is only compared with the number of bytes actually present, never used to size a
+/// buffer. Order: empty input; magic (a strict prefix of the magic is a truncated
+/// file, anything else is not an artifact, including a pre-format-1 raw artifact);
+/// complete header; format version (before anything else in the header is trusted);
+/// declared length against the bytes present, both too few and too many.
+pub fn split_artifact_header(bytes: &[u8]) -> Result<&[u8], LaniakeaError> {
+    let load = |msg: String| Err(LaniakeaError::ArtifactLoad(msg));
+    if bytes.is_empty() {
+        return load("proving artifact input is empty".into());
+    }
+    let seen = bytes.len().min(ARTIFACT_MAGIC.len());
+    if bytes[..seen] != ARTIFACT_MAGIC[..seen] {
+        return load(
+            "not a Laniakea proving artifact: the file lacks the Laniakea artifact header. \
+             Artifacts made before format 1 are raw data and are no longer read; re-export \
+             the artifact from its .zkey with the updated export_artifact \
+             (cargo run -p laniakea-cli --bin export_artifact -- <circuit.zkey> <out.artifact>)"
+                .into(),
+        );
+    }
+    if bytes.len() < ARTIFACT_HEADER_LEN {
+        return load(format!(
+            "truncated proving artifact: {} bytes, but the header alone is {ARTIFACT_HEADER_LEN}",
+            bytes.len()
+        ));
+    }
+    let version = u16::from_le_bytes([bytes[8], bytes[9]]);
+    if version != ARTIFACT_FORMAT_VERSION {
+        return Err(LaniakeaError::UnsupportedArtifactVersion {
+            found: version,
+            supported: ARTIFACT_FORMAT_VERSION,
+        });
+    }
+    let mut len = [0u8; 8];
+    len.copy_from_slice(&bytes[10..ARTIFACT_HEADER_LEN]);
+    let declared = u64::from_le_bytes(len);
+    let payload = &bytes[ARTIFACT_HEADER_LEN..];
+    let actual = payload.len() as u64;
+    if declared > actual {
+        return load(format!(
+            "truncated proving artifact: the header declares a {declared}-byte payload but only {actual} byte(s) follow it"
+        ));
+    }
+    if declared < actual {
+        return load(format!(
+            "{} unexpected trailing byte(s) after the declared {declared}-byte payload",
+            actual - declared
+        ));
+    }
+    Ok(payload)
+}
+
 /// A wrapper around `ConstraintMatrices<Fr>` that implements
 /// `CanonicalSerialize` and `CanonicalDeserialize`.
 ///
@@ -93,40 +158,51 @@ impl ProvingArtifact {
         self.matrices.num_constraints
     }
 
-    /// Serialize to bytes using Arkworks canonical serialization.
+    /// Serialize to the `.artifact` file format (see [`ARTIFACT_MAGIC`] and
+    /// `docs/ARTIFACT_FORMAT.md`): an 18-byte header followed by the Arkworks
+    /// canonical uncompressed serialization of `self`, byte for byte.
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        self.serialize_uncompressed(&mut bytes)
+        let mut payload = Vec::new();
+        self.serialize_uncompressed(&mut payload)
             .expect("serialization should not fail");
+        let len = u64::try_from(payload.len()).expect("payload length fits in u64");
+        let mut bytes = Vec::with_capacity(ARTIFACT_HEADER_LEN + payload.len());
+        bytes.extend_from_slice(&ARTIFACT_MAGIC);
+        bytes.extend_from_slice(&ARTIFACT_FORMAT_VERSION.to_le_bytes());
+        bytes.extend_from_slice(&len.to_le_bytes());
+        bytes.extend_from_slice(&payload);
         bytes
     }
 
-    /// Deserialize from bytes and check the result is structurally consistent.
+    /// Read an `.artifact` file and check the result is structurally consistent.
     ///
-    /// Fails with [`LaniakeaError::ArtifactLoad`] if the input is empty,
-    /// truncated or malformed (Arkworks also checks that every curve point is
-    /// on the curve and in the correct subgroup), or has bytes left over after
-    /// the artifact. Fails with [`LaniakeaError::InvalidArtifact`] if it parses
-    /// but [`Self::validate`] rejects it.
+    /// Order: the header is checked first ([`split_artifact_header`]: magic,
+    /// version, declared payload length against the bytes present), all in constant
+    /// time, so a wrong, unsupported or truncated file never reaches Arkworks. Then
+    /// the payload is deserialized (Arkworks also checks that every curve point is
+    /// on the curve and in the correct subgroup) and finally [`Self::validate`] runs.
     ///
-    /// Neither check proves the keys are *correct* for any circuit; see
-    /// [`Self::validate`].
+    /// Fails with [`LaniakeaError::UnsupportedArtifactVersion`] for another format
+    /// version, with [`LaniakeaError::ArtifactLoad`] for empty input, a missing or
+    /// incomplete header (a pre-format-1 raw artifact lands here, with a re-export
+    /// hint), a payload shorter or longer than declared, or a malformed payload,
+    /// and with [`LaniakeaError::InvalidArtifact`] if it parses but `validate`
+    /// rejects it.
+    ///
+    /// None of this proves the keys are *correct* for any circuit, and the format
+    /// has no integrity check; see [`Self::validate`].
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, LaniakeaError> {
-        if bytes.is_empty() {
-            return Err(LaniakeaError::ArtifactLoad(
-                "proving artifact input is empty".into(),
-            ));
-        }
-        let mut reader = bytes;
+        let payload = split_artifact_header(bytes)?;
+        let mut reader = payload;
         let artifact = Self::deserialize_uncompressed(&mut reader).map_err(|e| {
             LaniakeaError::ArtifactLoad(format!(
-                "could not deserialize proving artifact ({} bytes): {e}",
-                bytes.len()
+                "malformed proving artifact payload ({} bytes): {e}",
+                payload.len()
             ))
         })?;
         if !reader.is_empty() {
             return Err(LaniakeaError::ArtifactLoad(format!(
-                "{} unexpected trailing byte(s) after the proving artifact",
+                "malformed proving artifact payload: {} unused byte(s) inside the declared payload length",
                 reader.len()
             )));
         }

@@ -58,6 +58,12 @@ pub enum ProverError {
     ArtifactLoad { detail: String },
     #[error("invalid proving artifact: {detail}")]
     InvalidArtifact { detail: String },
+    /// The artifact has a Laniakea header with a format version this SDK does not
+    /// read (typically an artifact newer than the SDK).
+    #[error(
+        "unsupported proving artifact format version {found} (this SDK reads version {supported})"
+    )]
+    UnsupportedArtifactVersion { found: u32, supported: u32 },
     #[error("invalid circuit module: {detail}")]
     InvalidCircuitModule { detail: String },
     #[error("unsupported field: {detail}")]
@@ -135,6 +141,12 @@ impl From<LaniakeaError> for ProverError {
             LaniakeaError::CircuitLoad(c) => from_circuit_load(c),
             LaniakeaError::ArtifactLoad(detail) => ProverError::ArtifactLoad { detail },
             LaniakeaError::InvalidArtifact(detail) => ProverError::InvalidArtifact { detail },
+            LaniakeaError::UnsupportedArtifactVersion { found, supported } => {
+                ProverError::UnsupportedArtifactVersion {
+                    found: u32::from(found),
+                    supported: u32::from(supported),
+                }
+            }
             LaniakeaError::InvalidWitness(detail) => ProverError::InvalidWitness { detail },
             LaniakeaError::ProofGeneration(detail) => ProverError::ProofGeneration { detail },
             e @ (LaniakeaError::Verification(_)
@@ -228,6 +240,16 @@ mod tests {
         assert!(matches!(
             map(LaniakeaError::InvalidArtifact("a".into())),
             ProverError::InvalidArtifact { detail } if detail == "a"
+        ));
+        assert!(matches!(
+            map(LaniakeaError::UnsupportedArtifactVersion {
+                found: 2,
+                supported: 1
+            }),
+            ProverError::UnsupportedArtifactVersion {
+                found: 2,
+                supported: 1
+            }
         ));
         assert!(matches!(
             map(LaniakeaError::InvalidWitness("a".into())),

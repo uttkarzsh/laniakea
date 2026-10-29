@@ -194,6 +194,20 @@ fn construction_errors_are_typed() {
         LaniakeaProver::new(art[..art.len() / 2].to_vec(), wasm.clone()),
         Err(ProverError::ArtifactLoad { .. })
     ));
+    // An artifact of another format version, and a legacy file without the header.
+    let mut newer = art.clone();
+    newer[8..10].copy_from_slice(&2u16.to_le_bytes());
+    assert!(matches!(
+        LaniakeaProver::new(newer, wasm.clone()),
+        Err(ProverError::UnsupportedArtifactVersion {
+            found: 2,
+            supported: 1
+        })
+    ));
+    assert!(matches!(
+        LaniakeaProver::new(art[18..].to_vec(), wasm.clone()),
+        Err(ProverError::ArtifactLoad { detail }) if detail.contains("re-export")
+    ));
     assert!(matches!(
         LaniakeaProver::new(art.clone(), b"not wasm".to_vec()),
         Err(ProverError::InvalidCircuitModule { .. })

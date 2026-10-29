@@ -13,10 +13,22 @@ pub enum LaniakeaError {
     #[error("verification failed: {0}")]
     Verification(String),
 
-    /// Artifact bytes could not be read: empty, truncated, malformed, a point
-    /// that fails curve/subgroup validation, or trailing data.
+    /// Artifact bytes could not be read: empty, no Laniakea header (including a
+    /// pre-format-1 raw artifact), an incomplete header, a payload shorter or
+    /// longer than the header declares, or a malformed payload (for example a
+    /// point that fails curve/subgroup validation). An unknown format version is
+    /// [`UnsupportedArtifactVersion`](Self::UnsupportedArtifactVersion).
     #[error("artifact loading failed: {0}")]
     ArtifactLoad(String),
+
+    /// The artifact carries a Laniakea header, but with a format version this
+    /// build does not read. Reported before the payload is interpreted. Typically
+    /// the artifact is newer than the SDK: update the SDK or re-export the artifact
+    /// with a matching `export_artifact`.
+    #[error(
+        "unsupported proving artifact format version {found} (this build reads version {supported})"
+    )]
+    UnsupportedArtifactVersion { found: u16, supported: u16 },
 
     /// The circuit's WASM module could not be loaded. Distinct from
     /// [`ArtifactLoad`](Self::ArtifactLoad), which is about the proving artifact.

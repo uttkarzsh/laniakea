@@ -150,8 +150,9 @@ cargo run -p laniakea-cli --bin export_artifact -- <circuit>_final.zkey <circuit
 ```
 
 The app bundles `<name>.artifact` and `<name>.wasm` and loads them with `Circuit(name:)`.
-There is no Rust-free authoring workflow, and none is promised. The `.artifact` format
-carries no magic number or version (a known gap, see below).
+There is no Rust-free authoring workflow, and none is promised. The `.artifact` format is
+versioned (`docs/ARTIFACT_FORMAT.md`); artifacts made before the header existed must be
+re-exported with this tool.
 
 ## Before any public release (decisions not made here)
 
@@ -166,9 +167,11 @@ These are open and **not** resolved by the Phase 2A engineering work:
 - **circomlib (GPL-3.0).** `circuits/age_check` includes circomlib circuits. Whether the
   compiled example circuit files (already public in this repository) carry obligations needs
   legal review. Keep example circuit artifacts out of the SDK asset (they are).
-- **`.artifact` format is unversioned.** Once outside users create artifacts, a later change
-  cannot be detected. Adding a magic number and version is a separate, approved change that
-  should precede the first public tag, or the 0.x tags should say so.
+- **`.artifact` versioning: implemented, pending your review.** The artifact now has an
+  18-byte header with a magic and a format version (`docs/ARTIFACT_FORMAT.md`); format 1 is
+  the first versioned format and legacy raw files are intentionally not read. It carries no
+  circuit identity and no integrity check. Anyone who made raw artifacts from earlier commits
+  of `mother` must re-export them.
 - **Security posture.** The only circuit is a development example with a development
   trusted setup (single contribution), it does not constrain `out == 1`, and nothing is
   audited. State this in the release notes.

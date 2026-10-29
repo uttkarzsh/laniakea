@@ -23,7 +23,7 @@ The Rust proving pipeline, the UniFFI/Swift bindings, the iOS packaging scripts 
 |-----------|--------|
 | Circom age-check example circuit | ✅ Compiled artifacts (R1CS, WASM, zkey) |
 | Wasmi witness generation | ✅ Tested against reference implementation |
-| ProvingArtifact (portable zkey representation) | ✅ Serialization + roundtrip tested |
+| ProvingArtifact (portable zkey representation) | ✅ Versioned file format (`docs/ARTIFACT_FORMAT.md`), serialization + roundtrip tested |
 | Portable CircomReduction | ✅ Matches ark-circom output element-for-element |
 | Portable Groth16 proving | ✅ End-to-end test passes; proof verifies with snarkjs |
 | iOS compilation + dependency isolation | ✅ No ark-circom / Wasmer / Cranelift on iOS target |
@@ -86,7 +86,7 @@ parse_zkey_to_artifact()  (uses ark-circom)
         ↓
 ProvingArtifact { ProvingKey, ConstraintMatrices }
         ↓
-serialize (CanonicalSerialize)
+serialize (CanonicalSerialize) + 18-byte versioned header
         ↓
 age_check.artifact  ──► bundled with iOS app (export_artifact)
 ```
@@ -138,6 +138,7 @@ Public signals are `[out, threshold]`. The age-check circuit does **not** constr
 - Portable representation of proving data from zkey
 - Fields: `ProvingKey<Bn254>`, `ConstraintMatrices<Fr>` (wrapped for serialization)
 - `CanonicalSerialize` / `CanonicalDeserialize` roundtrip tested
+- `.artifact` files: 18-byte header (magic, format version, payload length) + that serialization; see `docs/ARTIFACT_FORMAT.md`. Pre-header files must be re-exported
 
 ### 5. Portable CircomReduction
 - Implements `R1CSToQAP` trait

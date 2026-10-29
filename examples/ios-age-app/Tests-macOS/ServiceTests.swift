@@ -68,6 +68,7 @@ func expectFailure(
 let allSDKErrors: [LaniakeaError] = [
     .fileUnreadable(file: "age_check.wasm", reason: "gone"),
     .invalidArtifact(detail: "d"),
+    .unsupportedArtifactVersion(found: 2, supported: 1),
     .invalidCircuit(detail: "d"),
     .invalidInputValue(signal: "age", index: 0, value: "x"),
     .unknownInput(name: "nope"),
@@ -85,6 +86,7 @@ func caseName(_ e: LaniakeaError) -> String {
     switch e {
     case .fileUnreadable: "fileUnreadable"
     case .invalidArtifact: "invalidArtifact"
+    case .unsupportedArtifactVersion: "unsupportedArtifactVersion"
     case .invalidCircuit: "invalidCircuit"
     case .invalidInputValue: "invalidInputValue"
     case .unknownInput: "unknownInput"
@@ -270,7 +272,7 @@ struct ServiceTests {
 
     static func messageTests() {
         print("user-facing messages")
-        check(allSDKErrors.count == 13, "all 13 LaniakeaError cases are listed")
+        check(allSDKErrors.count == 14, "all 14 LaniakeaError cases are listed")
         check(Set(allSDKErrors.map(caseName)).count == allSDKErrors.count, "the listed cases are distinct")
         var messages = Set<String>()
         for e in allSDKErrors {

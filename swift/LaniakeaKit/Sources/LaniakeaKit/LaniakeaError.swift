@@ -21,6 +21,12 @@ public enum LaniakeaError: Error, Sendable, Equatable {
     /// The proving artifact is missing data, damaged, or internally inconsistent
     /// (including an artifact whose size does not fit the WASM circuit).
     case invalidArtifact(detail: String)
+    /// The proving artifact has the Laniakea header but a format version this SDK
+    /// does not read (`found`; this SDK reads `supported`). Typically the artifact is
+    /// newer than the SDK: update the SDK, or re-export the artifact with a matching
+    /// `export_artifact`. A file without the header at all (an artifact from before
+    /// format 1) is `.invalidArtifact`.
+    case unsupportedArtifactVersion(found: Int, supported: Int)
     /// The WASM is not a usable Circom circuit for this prover: not valid WASM,
     /// a field other than BN254, or a module the interpreter cannot load.
     case invalidCircuit(detail: String)
@@ -109,6 +115,8 @@ extension LaniakeaError {
             self = .invalidArtifact(detail: "loading: \(detail)")
         case .InvalidArtifact(let detail):
             self = .invalidArtifact(detail: detail)
+        case .UnsupportedArtifactVersion(let found, let supported):
+            self = .unsupportedArtifactVersion(found: Int(clamping: found), supported: Int(clamping: supported))
         case .InvalidCircuitModule(let detail):
             self = .invalidCircuit(detail: detail)
         case .UnsupportedField(let detail):
@@ -132,6 +140,8 @@ extension LaniakeaError: LocalizedError {
             "The circuit file \(file) could not be read."
         case .invalidArtifact:
             "The proving artifact is damaged, incomplete or does not match the circuit."
+        case .unsupportedArtifactVersion:
+            "The proving artifact was made in a format this version of the SDK does not read."
         case .invalidCircuit:
             "The circuit WASM is not a usable BN254 Circom circuit."
         case .invalidInputValue(let signal, let index, _):
@@ -165,6 +175,7 @@ extension LaniakeaError: CustomDebugStringConvertible {
         switch self {
         case .fileUnreadable(let file, let reason): "fileUnreadable: \(file): \(reason)"
         case .invalidArtifact(let detail): "invalidArtifact: \(detail)"
+        case .unsupportedArtifactVersion(let found, let supported): "unsupportedArtifactVersion: found \(found), supported \(supported)"
         case .invalidCircuit(let detail): "invalidCircuit: \(detail)"
         case .invalidInputValue(let signal, let index, let value): "invalidInputValue: \(signal)[\(index)] = \"\(value)\""
         case .unknownInput(let name): "unknownInput: \(name)"

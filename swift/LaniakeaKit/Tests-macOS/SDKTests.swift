@@ -49,6 +49,7 @@ let mappings: [(ProverError, LaniakeaError)] = [
     (.WitnessEngine(detail: "d"), .provingFailed(detail: "witness engine: d")),
     (.ArtifactLoad(detail: "d"), .invalidArtifact(detail: "loading: d")),
     (.InvalidArtifact(detail: "d"), .invalidArtifact(detail: "d")),
+    (.UnsupportedArtifactVersion(found: 2, supported: 1), .unsupportedArtifactVersion(found: 2, supported: 1)),
     (.InvalidCircuitModule(detail: "d"), .invalidCircuit(detail: "d")),
     (.UnsupportedField(detail: "d"), .invalidCircuit(detail: "unsupported field: d")),
     (.CircuitEngine(detail: "d"), .invalidCircuit(detail: "circuit engine: d")),
@@ -71,6 +72,7 @@ func caseName(_ e: ProverError) -> String {
     case .WitnessEngine: "WitnessEngine"
     case .ArtifactLoad: "ArtifactLoad"
     case .InvalidArtifact: "InvalidArtifact"
+    case .UnsupportedArtifactVersion: "UnsupportedArtifactVersion"
     case .InvalidCircuitModule: "InvalidCircuitModule"
     case .UnsupportedField: "UnsupportedField"
     case .CircuitEngine: "CircuitEngine"
@@ -139,8 +141,8 @@ struct SDKTests {
 
     static func errorMappingTests() {
         print("error mapping")
-        check(mappings.count == 17, "all 17 ProverError cases are listed")
-        check(Set(mappings.map { caseName($0.0) }).count == 17, "the listed cases are distinct")
+        check(mappings.count == 18, "all 18 ProverError cases are listed")
+        check(Set(mappings.map { caseName($0.0) }).count == 18, "the listed cases are distinct")
         for (source, expected) in mappings {
             let mapped = LaniakeaError(source)
             check(mapped == expected, "\(caseName(source)) -> \(mapped.debugDescription)")
@@ -346,6 +348,33 @@ struct SDKTests {
         }
         await expectError("a truncated artifact", {
             _ = try await Prover(circuit: Circuit(artifact: good.artifact.prefix(good.artifact.count / 2), wasm: good.wasm))
+        }) {
+            if case .invalidArtifact = $0 { return true }
+            return false
+        }
+        // The artifact file format: header, version, declared length.
+        await expectError("an artifact of an unsupported format version", {
+            var newer = good.artifact
+            newer.replaceSubrange(8..<10, with: [2, 0])
+            _ = try await Prover(circuit: Circuit(artifact: newer, wasm: good.wasm))
+        }) {
+            if case .unsupportedArtifactVersion(found: 2, supported: 1) = $0 { return true }
+            return false
+        }
+        await expectError("a legacy artifact without the header", {
+            _ = try await Prover(circuit: Circuit(artifact: good.artifact.dropFirst(18), wasm: good.wasm))
+        }) {
+            if case .invalidArtifact(let detail) = $0 { return detail.contains("re-export") }
+            return false
+        }
+        await expectError("an artifact with trailing bytes", {
+            _ = try await Prover(circuit: Circuit(artifact: good.artifact + Data([0]), wasm: good.wasm))
+        }) {
+            if case .invalidArtifact(let detail) = $0 { return detail.contains("trailing") }
+            return false
+        }
+        await expectError("an artifact error is reported before the WASM is loaded", {
+            _ = try await Prover(circuit: Circuit(artifact: Data([1, 2, 3]), wasm: Data([0, 1, 2, 3])))
         }) {
             if case .invalidArtifact = $0 { return true }
             return false

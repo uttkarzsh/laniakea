@@ -9,7 +9,10 @@ use ark_bn254::Fr;
 use ark_ff::One;
 use ark_serialize::CanonicalSerialize;
 use laniakea_core::backend::prover::prove_with_artifact;
-use laniakea_core::{parse_zkey_to_artifact, LaniakeaError, ProvingArtifact};
+use laniakea_core::{
+    parse_zkey_to_artifact, split_artifact_header, LaniakeaError, ProvingArtifact,
+    ARTIFACT_FORMAT_VERSION, ARTIFACT_HEADER_LEN, ARTIFACT_MAGIC,
+};
 use std::fs;
 
 fn age_check_artifact() -> ProvingArtifact {
@@ -200,11 +203,11 @@ fn corrupted_bytes_never_panic_and_accepted_results_are_consistent() {
     );
 }
 
-/// Offset of the matrices within the serialized artifact: the proving key comes
-/// first, then six `usize` fields (three dimensions, three non-zero counts),
-/// then the row count of A.
+/// Offset of the matrices within the serialized artifact: the 18-byte header,
+/// the proving key, then six `usize` fields (three dimensions, three non-zero
+/// counts), then the row count of A.
 fn matrices_offset(artifact: &ProvingArtifact) -> usize {
-    artifact.proving_key.uncompressed_size()
+    ARTIFACT_HEADER_LEN + artifact.proving_key.uncompressed_size()
 }
 
 #[test]
@@ -434,4 +437,244 @@ fn structural_validation_does_not_claim_to_detect_coefficient_changes() {
     let mut artifact = age_check_artifact();
     artifact.matrices.a[0][0].0 += Fr::one();
     artifact.validate().expect("structurally valid");
+}
+
+// ------------------------------------------------------- artifact file format
+
+/// A format-1 header for `payload`, with the given version and declared length.
+fn wrap(version: u16, declared: u64, payload: &[u8]) -> Vec<u8> {
+    let mut v = ARTIFACT_MAGIC.to_vec();
+    v.extend_from_slice(&version.to_le_bytes());
+    v.extend_from_slice(&declared.to_le_bytes());
+    v.extend_from_slice(payload);
+    v
+}
+
+fn wrap_ok(payload: &[u8]) -> Vec<u8> {
+    wrap(1, payload.len() as u64, payload)
+}
+
+/// The Arkworks serialization alone: what the artifact format called "the
+/// artifact" before the header existed.
+fn raw_payload(artifact: &ProvingArtifact) -> Vec<u8> {
+    let mut payload = Vec::new();
+    artifact.serialize_uncompressed(&mut payload).unwrap();
+    payload
+}
+
+fn load_message(err: LaniakeaError) -> String {
+    match err {
+        LaniakeaError::ArtifactLoad(m) => m,
+        other => panic!("expected ArtifactLoad, got {other:?}"),
+    }
+}
+
+#[test]
+fn header_bytes_are_exactly_the_documented_layout() {
+    let artifact = age_check_artifact();
+    let bytes = artifact.to_bytes();
+    let payload = raw_payload(&artifact);
+
+    assert_eq!(ARTIFACT_HEADER_LEN, 18);
+    assert_eq!(ARTIFACT_FORMAT_VERSION, 1);
+    assert_eq!(
+        &bytes[..8],
+        &[0x89, 0x4C, 0x4E, 0x4B, 0x41, 0x52, 0x54, 0x0A]
+    );
+    assert_eq!(&bytes[..8], b"\x89LNKART\n");
+    assert_eq!(&bytes[8..10], &[1, 0], "version 1, little-endian u16");
+    assert_eq!(
+        &bytes[10..18],
+        &(payload.len() as u64).to_le_bytes(),
+        "payload length, little-endian u64"
+    );
+    assert_eq!(bytes.len(), 18 + payload.len());
+    assert_eq!(
+        &bytes[18..],
+        &payload[..],
+        "payload is byte-for-byte the Arkworks canonical uncompressed serialization"
+    );
+}
+
+#[test]
+fn format_1_round_trips() {
+    let artifact = age_check_artifact();
+    let bytes = artifact.to_bytes();
+    let restored = ProvingArtifact::from_bytes(&bytes).expect("round trip");
+    assert_eq!(restored, artifact);
+    assert_eq!(restored.to_bytes(), bytes, "re-serialization is identical");
+}
+
+#[test]
+fn every_short_input_is_rejected_by_the_header_check_alone() {
+    let bytes = age_check_artifact().to_bytes();
+    // Every strict prefix of the header: empty, then truncated.
+    let err = split_artifact_header(&[]).unwrap_err();
+    assert!(load_message(err).contains("empty"));
+    for n in 1..ARTIFACT_HEADER_LEN {
+        let msg = load_message(split_artifact_header(&bytes[..n]).unwrap_err());
+        assert!(msg.contains("truncated"), "prefix {n}: {msg}");
+    }
+    // The complete header with nothing after it declares a payload that is not there.
+    let msg = load_message(split_artifact_header(&bytes[..ARTIFACT_HEADER_LEN]).unwrap_err());
+    assert!(msg.contains("truncated"), "{msg}");
+    // Short inputs that are not a prefix of the magic are not artifacts.
+    for n in 1..ARTIFACT_HEADER_LEN {
+        let msg = load_message(split_artifact_header(&vec![0x55; n]).unwrap_err());
+        assert!(
+            msg.contains("lacks the Laniakea artifact header"),
+            "{n}: {msg}"
+        );
+    }
+    // The same through from_bytes.
+    for n in 0..ARTIFACT_HEADER_LEN {
+        assert!(matches!(
+            ProvingArtifact::from_bytes(&bytes[..n]),
+            Err(LaniakeaError::ArtifactLoad(_))
+        ));
+    }
+}
+
+#[test]
+fn wrong_magic_is_rejected_at_every_position() {
+    let bytes = age_check_artifact().to_bytes();
+    for i in 0..ARTIFACT_MAGIC.len() {
+        let mut bad = bytes.clone();
+        bad[i] ^= 0x01;
+        let msg = load_message(split_artifact_header(&bad).unwrap_err());
+        assert!(
+            msg.contains("lacks the Laniakea artifact header"),
+            "byte {i}: {msg}"
+        );
+    }
+    // A WebAssembly module and a text file are not artifacts either.
+    for other in [
+        &b"\0asm\x01\0\0\0 more bytes follow here"[..],
+        b"{\"not\": \"an artifact\"}   ",
+    ] {
+        assert!(split_artifact_header(other).is_err());
+    }
+}
+
+#[test]
+fn a_legacy_raw_artifact_gets_an_actionable_error_without_deserialization() {
+    let legacy = raw_payload(&age_check_artifact());
+    // `split_artifact_header` only looks at the header and returns a slice: it cannot
+    // run Arkworks, so this proves the legacy file is refused before any payload work.
+    let msg = load_message(split_artifact_header(&legacy).unwrap_err());
+    assert!(msg.contains("lacks the Laniakea artifact header"), "{msg}");
+    assert!(
+        msg.contains("no longer read") && msg.contains("export_artifact"),
+        "{msg}"
+    );
+    let msg = load_message(ProvingArtifact::from_bytes(&legacy).unwrap_err());
+    assert!(msg.contains("re-export"), "{msg}");
+}
+
+#[test]
+fn unsupported_versions_are_reported_before_anything_else_is_interpreted() {
+    let artifact = age_check_artifact();
+    let payload = raw_payload(&artifact);
+    for version in [0u16, 2, 0x0100, u16::MAX] {
+        let expected = LaniakeaError::UnsupportedArtifactVersion {
+            found: version,
+            supported: 1,
+        };
+        // A valid payload, a garbage payload, and a length that matches nothing: the
+        // version decides first in every case.
+        for bytes in [
+            wrap(version, payload.len() as u64, &payload),
+            wrap(version, 4, b"junk"),
+            wrap(version, u64::MAX, b""),
+        ] {
+            let err = ProvingArtifact::from_bytes(&bytes).unwrap_err();
+            assert_eq!(
+                format!("{err:?}"),
+                format!("{expected:?}"),
+                "version {version}"
+            );
+            assert!(matches!(
+                split_artifact_header(&bytes),
+                Err(LaniakeaError::UnsupportedArtifactVersion { found, supported: 1 }) if found == version
+            ));
+        }
+    }
+}
+
+#[test]
+fn payload_length_is_checked_against_the_bytes_present_before_arkworks() {
+    let payload = raw_payload(&age_check_artifact());
+    let n = payload.len() as u64;
+    // Declared longer than present (including absurd values: nothing is allocated).
+    for declared in [n + 1, n + 1000, u64::MAX / 2, u64::MAX] {
+        let msg = load_message(split_artifact_header(&wrap(1, declared, &payload)).unwrap_err());
+        assert!(msg.contains("truncated"), "declared {declared}: {msg}");
+    }
+    // Declared shorter than present.
+    for declared in [0, 1, n - 1] {
+        let msg = load_message(split_artifact_header(&wrap(1, declared, &payload)).unwrap_err());
+        assert!(msg.contains("trailing"), "declared {declared}: {msg}");
+    }
+    // Exactly right.
+    assert_eq!(
+        split_artifact_header(&wrap_ok(&payload)).unwrap(),
+        &payload[..]
+    );
+}
+
+#[test]
+fn truncated_files_and_trailing_bytes_never_reach_arkworks() {
+    let bytes = age_check_artifact().to_bytes();
+    for cut in [
+        ARTIFACT_HEADER_LEN,
+        ARTIFACT_HEADER_LEN + 1,
+        bytes.len() / 2,
+        bytes.len() - 1,
+    ] {
+        let msg = load_message(split_artifact_header(&bytes[..cut]).unwrap_err());
+        assert!(msg.contains("truncated"), "cut {cut}: {msg}");
+    }
+    let mut longer = bytes.clone();
+    longer.extend_from_slice(&[0xAB; 7]);
+    let msg = load_message(split_artifact_header(&longer).unwrap_err());
+    assert!(msg.contains("7 unexpected trailing"), "{msg}");
+}
+
+#[test]
+fn malformed_payloads_with_a_correct_header_are_malformed_serialization() {
+    let payload = raw_payload(&age_check_artifact());
+
+    // Garbage of any length, honestly declared.
+    let msg = load_message(ProvingArtifact::from_bytes(&wrap_ok(&[0xFF; 1000])).unwrap_err());
+    assert!(msg.contains("malformed proving artifact payload"), "{msg}");
+
+    // A payload cut short, with the header corrected to match: only Arkworks can see it.
+    for cut in [1, 8, payload.len() / 3, payload.len() - 1] {
+        let msg = load_message(ProvingArtifact::from_bytes(&wrap_ok(&payload[..cut])).unwrap_err());
+        assert!(
+            msg.contains("malformed proving artifact payload"),
+            "cut {cut}: {msg}"
+        );
+    }
+
+    // Extra bytes inside the declared length.
+    let mut longer = payload.clone();
+    longer.extend_from_slice(&[0, 0, 0]);
+    let msg = load_message(ProvingArtifact::from_bytes(&wrap_ok(&longer)).unwrap_err());
+    assert!(
+        msg.contains("3 unused byte(s) inside the declared payload"),
+        "{msg}"
+    );
+
+    // The same payload with correct framing is accepted, so the cases above are the framing's doing.
+    assert!(ProvingArtifact::from_bytes(&wrap_ok(&payload)).is_ok());
+}
+
+#[test]
+fn structurally_invalid_artifacts_stay_distinct_from_malformed_serialization() {
+    let mut artifact = age_check_artifact();
+    artifact.matrices.num_constraints += 1;
+    // Well-formed framing and well-formed Arkworks data, inconsistent contents.
+    let err = ProvingArtifact::from_bytes(&artifact.to_bytes()).unwrap_err();
+    assert!(matches!(err, LaniakeaError::InvalidArtifact(_)), "{err:?}");
 }

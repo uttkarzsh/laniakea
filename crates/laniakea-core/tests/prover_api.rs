@@ -9,7 +9,7 @@ use ark_serialize::CanonicalSerialize;
 use laniakea_core::backend::prover::parse_vk_from_json;
 use laniakea_core::{
     parse_zkey_to_artifact, CircuitLoadError, Groth16Backend, LaniakeaError, ProofResult, Prover,
-    ProvingArtifact, ProvingArtifacts, WitnessError, ZkBackend,
+    ProvingArtifact, ProvingArtifacts, WitnessError, ZkBackend, ARTIFACT_HEADER_LEN,
 };
 use num_bigint::BigInt;
 use std::fs;
@@ -291,6 +291,53 @@ fn invalid_serialized_artifacts_are_rejected_at_construction() {
             "{name}"
         );
     }
+}
+
+/// The artifact is read, and rejected, before the circuit's WASM is looked at: with
+/// an unusable WASM, every bad artifact still yields an artifact error and never a
+/// `CircuitLoad` error.
+#[test]
+fn artifact_errors_come_before_wasm_loading() {
+    let bytes = artifact().to_bytes();
+    let bad_wasm = b"definitely not wasm".to_vec();
+
+    // Sanity: this WASM alone is rejected as a circuit.
+    assert!(matches!(
+        Prover::new(&bytes, &bad_wasm),
+        Err(LaniakeaError::CircuitLoad(_))
+    ));
+
+    let mut wrong_version = bytes.clone();
+    wrong_version[8..10].copy_from_slice(&2u16.to_le_bytes());
+    let legacy = bytes[ARTIFACT_HEADER_LEN..].to_vec();
+    let mut structurally_invalid = artifact();
+    structurally_invalid.matrices.num_constraints += 1;
+
+    assert!(matches!(
+        Prover::new(&wrong_version, &bad_wasm),
+        Err(LaniakeaError::UnsupportedArtifactVersion {
+            found: 2,
+            supported: 1
+        })
+    ));
+    for (name, input) in [
+        ("empty", Vec::new()),
+        ("legacy raw artifact", legacy),
+        ("truncated", bytes[..bytes.len() / 2].to_vec()),
+        ("trailing byte", [bytes.clone(), vec![0]].concat()),
+    ] {
+        assert!(
+            matches!(
+                Prover::new(&input, &bad_wasm),
+                Err(LaniakeaError::ArtifactLoad(_))
+            ),
+            "{name}"
+        );
+    }
+    assert!(matches!(
+        Prover::new(&structurally_invalid.to_bytes(), &bad_wasm),
+        Err(LaniakeaError::InvalidArtifact(_))
+    ));
 }
 
 #[test]

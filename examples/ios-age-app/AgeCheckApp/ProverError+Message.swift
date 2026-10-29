@@ -30,7 +30,7 @@ nonisolated extension LaniakeaError {
             .appInput
         case .circuitRejectedInputs:
             .circuitRejected
-        case .fileUnreadable, .invalidArtifact, .invalidCircuit:
+        case .fileUnreadable, .invalidArtifact, .unsupportedArtifactVersion, .invalidCircuit:
             .bundledResources
         case .outOfMemory, .provingFailed:
             .proving
@@ -45,6 +45,8 @@ nonisolated extension LaniakeaError {
             "The bundled file \(file) is missing or unreadable. Rebuild the app with its resources."
         case .invalidArtifact:
             "The bundled proving artifact is damaged, inconsistent or does not match the circuit."
+        case .unsupportedArtifactVersion:
+            "The bundled proving artifact was made in a format this app's SDK does not read. Re-export it or update the SDK."
         case .invalidCircuit:
             "The bundled circuit file (WASM) is not a usable BN254 Circom circuit."
         case .invalidInputValue:

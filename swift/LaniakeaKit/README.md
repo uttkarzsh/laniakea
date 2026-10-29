@@ -59,6 +59,11 @@ try proof.write(to: directory) // proof.json + public.json, for an independent v
   circuit has known limitations (it does not constrain `out == 1` and does not range-check
   its inputs). Do not ship it for real use. See *Security Model: Proving, Verifying, and
   Deciding* and *Trusted Setup Provenance (age_check)* in the repository README.
+- **Artifact files are versioned.** An `.artifact` starts with a header (magic and format
+  version, `docs/ARTIFACT_FORMAT.md`). A file from a newer format is
+  `.unsupportedArtifactVersion(found:supported:)`; a missing header (an artifact from before
+  format 1: re-export it with `export_artifact`), truncation, trailing bytes or a malformed
+  payload are `.invalidArtifact`. This is not an integrity check.
 - **A `Circuit` is only two blobs.** The artifact carries no circuit identity, so a WASM
   from another circuit is not always detected. Keep the pair from one build.
 - **Tests:** `scripts/swift-sdk-test.sh` (macOS host; `REQUIRE_SNARKJS=1` to require the

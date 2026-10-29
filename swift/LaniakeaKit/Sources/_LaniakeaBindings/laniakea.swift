@@ -871,6 +871,12 @@ public enum ProverError {
     )
     case InvalidArtifact(detail: String
     )
+    /**
+     * The artifact has a Laniakea header with a format version this SDK does not
+     * read (typically an artifact newer than the SDK).
+     */
+    case UnsupportedArtifactVersion(found: UInt32, supported: UInt32
+    )
     case InvalidCircuitModule(detail: String
     )
     case UnsupportedField(detail: String
@@ -944,22 +950,26 @@ public struct FfiConverterTypeProverError: FfiConverterRustBuffer {
         case 11: return .InvalidArtifact(
             detail: try FfiConverterString.read(from: &buf)
             )
-        case 12: return .InvalidCircuitModule(
+        case 12: return .UnsupportedArtifactVersion(
+            found: try FfiConverterUInt32.read(from: &buf), 
+            supported: try FfiConverterUInt32.read(from: &buf)
+            )
+        case 13: return .InvalidCircuitModule(
             detail: try FfiConverterString.read(from: &buf)
             )
-        case 13: return .UnsupportedField(
+        case 14: return .UnsupportedField(
             detail: try FfiConverterString.read(from: &buf)
             )
-        case 14: return .CircuitEngine(
+        case 15: return .CircuitEngine(
             detail: try FfiConverterString.read(from: &buf)
             )
-        case 15: return .InvalidWitness(
+        case 16: return .InvalidWitness(
             detail: try FfiConverterString.read(from: &buf)
             )
-        case 16: return .ProofGeneration(
+        case 17: return .ProofGeneration(
             detail: try FfiConverterString.read(from: &buf)
             )
-        case 17: return .Internal(
+        case 18: return .Internal(
             detail: try FfiConverterString.read(from: &buf)
             )
 
@@ -1036,33 +1046,39 @@ public struct FfiConverterTypeProverError: FfiConverterRustBuffer {
             FfiConverterString.write(detail, into: &buf)
             
         
-        case let .InvalidCircuitModule(detail):
+        case let .UnsupportedArtifactVersion(found,supported):
             writeInt(&buf, Int32(12))
-            FfiConverterString.write(detail, into: &buf)
+            FfiConverterUInt32.write(found, into: &buf)
+            FfiConverterUInt32.write(supported, into: &buf)
             
         
-        case let .UnsupportedField(detail):
+        case let .InvalidCircuitModule(detail):
             writeInt(&buf, Int32(13))
             FfiConverterString.write(detail, into: &buf)
             
         
-        case let .CircuitEngine(detail):
+        case let .UnsupportedField(detail):
             writeInt(&buf, Int32(14))
             FfiConverterString.write(detail, into: &buf)
             
         
-        case let .InvalidWitness(detail):
+        case let .CircuitEngine(detail):
             writeInt(&buf, Int32(15))
             FfiConverterString.write(detail, into: &buf)
             
         
-        case let .ProofGeneration(detail):
+        case let .InvalidWitness(detail):
             writeInt(&buf, Int32(16))
             FfiConverterString.write(detail, into: &buf)
             
         
-        case let .Internal(detail):
+        case let .ProofGeneration(detail):
             writeInt(&buf, Int32(17))
+            FfiConverterString.write(detail, into: &buf)
+            
+        
+        case let .Internal(detail):
+            writeInt(&buf, Int32(18))
             FfiConverterString.write(detail, into: &buf)
             
         }
