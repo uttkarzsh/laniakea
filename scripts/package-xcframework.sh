@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Package the staged iOS static libraries into a HEADERLESS laniakeaFFI.xcframework and
+# Package the staged iOS static libraries into a HEADERLESS LaniakeaRustLib.xcframework and
 # prepare the root Swift package (Package.swift) around it. Needs full Xcode (xcodebuild).
 #
 # The XCFramework carries no C header and no module map on purpose: Xcode copies every
@@ -22,7 +22,7 @@
 # directory is removed.
 #
 # Outputs:
-#   Binaries/laniakeaFFI.xcframework                    (what the root Package.swift uses; git-ignored)
+#   Binaries/LaniakeaRustLib.xcframework                    (what the root Package.swift uses; git-ignored)
 #   swift/LaniakeaKit/Sources/_LaniakeaBindings/laniakea.swift   (generated; committed)
 #   swift/LaniakeaKit/Sources/laniakeaFFI/include/laniakeaFFI.h  (generated; committed)
 # <min> is IPHONEOS_DEPLOYMENT_TARGET (default 15.0) and must equal the iOS version in the
@@ -33,12 +33,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 # shellcheck source=lib/common.sh
 . "$ROOT/scripts/lib/common.sh"
+# shellcheck source=lib/xcframework.sh
+. "$ROOT/scripts/lib/xcframework.sh"
 
 "$ROOT/scripts/build-ios.sh"
 
 ios_layout
 BIND="$TARGET/uniffi/swift"
-XCF="$STAGE/laniakeaFFI.xcframework"
+XCF="$STAGE/LaniakeaRustLib.xcframework"
 LIBNAME=liblaniakea_uniffi.a
 
 if ! xcodebuild -version >/dev/null 2>&1; then
@@ -62,7 +64,7 @@ TMP="$(mktemp -d "$ROOT/Binaries/.package.XXXXXX")"
 INSTALLING=0
 SRC_SWIFT="$ROOT/swift/LaniakeaKit/Sources/_LaniakeaBindings/laniakea.swift"
 SRC_HEADER="$ROOT/swift/LaniakeaKit/Sources/laniakeaFFI/include/laniakeaFFI.h"
-DEST_XCF="$ROOT/Binaries/laniakeaFFI.xcframework"
+DEST_XCF="$ROOT/Binaries/LaniakeaRustLib.xcframework"
 
 # Runs on every exit. If we fail after the first existing file was replaced, put the
 # previous output back; always remove the temporary directory.
@@ -82,7 +84,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-NEW_XCF="$TMP/laniakeaFFI.xcframework"
+NEW_XCF="$TMP/LaniakeaRustLib.xcframework"
 echo "==> xcodebuild -create-xcframework (headerless)"
 xcodebuild -create-xcframework \
   -library "$STAGE/device/$LIBNAME" \
@@ -97,67 +99,18 @@ echo "==> checking that Package.swift declares iOS $MIN"
 grep -Eq "\.iOS\(\"$MIN\"\)" "$ROOT/Package.swift" \
   || die "Package.swift does not declare .iOS(\"$MIN\"); the libraries were built for $MIN. Update the manifest or IPHONEOS_DEPLOYMENT_TARGET."
 
-# The final XCFramework, not the staged libraries it was made from: exactly the expected
-# files and slices (platform, variant, architectures), each library byte-identical to its
-# staged counterpart, and the deployment target of this project's own objects.
+# The final XCFramework, not the staged libraries it was made from (see
+# scripts/lib/xcframework.sh).
 echo "==> validating the final XCFramework"
 if [ "${INCLUDE_X86_64_SIM:-0}" = "1" ]; then SIM_ARCHS="arm64 x86_64"; SIM_ID="ios-arm64_x86_64-simulator"; else SIM_ARCHS="arm64"; SIM_ID="ios-arm64-simulator"; fi
-python3 - "$NEW_XCF" "$STAGE" "$LIBNAME" "$MIN" "$SIM_ID" "$SIM_ARCHS" "$TMP" <<'PY' || die "the final XCFramework failed validation"
-import filecmp, os, plistlib, re, subprocess, sys
-xcf, stage, lib, minos, sim_id, sim_archs, tmp = sys.argv[1:8]
-want = {  # LibraryIdentifier -> (variant, architectures, staged library)
-    "ios-arm64": (None, ["arm64"], os.path.join(stage, "device", lib)),
-    sim_id: ("simulator", sorted(sim_archs.split()), os.path.join(stage, "simulator", lib)),
-}
-def fail(msg): sys.exit("  FAIL: " + msg)
-files = sorted(os.path.relpath(os.path.join(d, f), xcf) for d, _, fs in os.walk(xcf) for f in fs)
-expected = sorted(["Info.plist"] + [os.path.join(i, lib) for i in want])
-if files != expected: fail("XCFramework files are %s, expected %s" % (files, expected))
-info = plistlib.load(open(os.path.join(xcf, "Info.plist"), "rb"))
-libs = info["AvailableLibraries"]
-if sorted(l["LibraryIdentifier"] for l in libs) != sorted(want): fail("slices are %s" % [l["LibraryIdentifier"] for l in libs])
-for l in libs:
-    ident = l["LibraryIdentifier"]
-    variant, archs, staged = want[ident]
-    if l.get("SupportedPlatform") != "ios": fail("%s: platform %r" % (ident, l.get("SupportedPlatform")))
-    if l.get("SupportedPlatformVariant") != variant: fail("%s: variant %r" % (ident, l.get("SupportedPlatformVariant")))
-    if sorted(l["SupportedArchitectures"]) != archs: fail("%s: architectures %r" % (ident, l["SupportedArchitectures"]))
-    if l["LibraryPath"] != lib or l.get("BinaryPath", lib) != lib: fail("%s: library path %r" % (ident, l["LibraryPath"]))
-    path = os.path.join(xcf, ident, lib)
-    if not filecmp.cmp(path, staged, shallow=False): fail("%s differs from the staged library %s" % (ident, staged))
-    got = sorted(subprocess.check_output(["lipo", "-archs", path], text=True).split())
-    if got != archs: fail("%s: lipo reports %s" % (ident, got))
-    # This project's own objects must have been built for exactly this platform and minos.
-    platform = {"ios-arm64": "2"}.get(ident, "7")
-    work = os.path.join(tmp, "members-" + ident); os.makedirs(work)
-    subprocess.check_call(["ar", "-x", os.path.abspath(path)], cwd=work)
-    own = [f for f in os.listdir(work) if re.match(r"(laniakea_uniffi|laniakea_core|wasmi_witness)-.*\.o$", f)]
-    if not own: fail("%s: no objects of this project's crates found" % ident)
-    for f in own:
-        out = subprocess.check_output(["otool", "-l", os.path.join(work, f)], text=True)
-        m = re.search(r"LC_BUILD_VERSION.*?platform (\S+).*?minos (\S+)", out, re.S)
-        if not m or m.group(1) != platform or m.group(2) != minos:
-            fail("%s: %s has platform/minos %s, expected %s/%s" % (ident, f, m.groups() if m else None, platform, minos))
-    print("  ok  %s: %s, %s, %d own objects at platform %s minos %s, identical to the staged library" % (ident, "ios" + ("-" + variant if variant else ""), "+".join(archs), len(own), platform, minos))
-PY
+validate_xcframework "$NEW_XCF" "$STAGE" "$LIBNAME" "$MIN" "$SIM_ID" "$SIM_ARCHS" "$TMP"
+echo "==> checking that no builder paths are embedded"
+check_no_builder_paths "$NEW_XCF" "$HOME" "$ROOT"
 
 # The generated Swift binding and C header (one generation) must describe the libraries
-# inside the final XCFramework: bindings generated from each of its libraries must equal
-# them byte for byte.
+# inside the final XCFramework.
 echo "==> validating that the binding and header belong to the XCFramework's libraries"
-for f in laniakea.swift laniakeaFFI.h; do
-  [ -s "$BIND/$f" ] || die "missing generated $BIND/$f"
-done
-for slice in "$NEW_XCF"/*/"$LIBNAME"; do
-  chk="$TMP/bindgen-$(basename "$(dirname "$slice")")"
-  mkdir -p "$chk"
-  cargo run -q -p uniffi-bindgen -- generate --library "$slice" --language swift --out-dir "$chk" --no-format >"$chk/bindgen.log" 2>&1 \
-    || { cat "$chk/bindgen.log" >&2; die "bindgen could not read the interface from $slice"; }
-  for f in laniakea.swift laniakeaFFI.h; do
-    cmp -s "$chk/$f" "$BIND/$f" || die "$f generated from $slice differs from the one to be installed; the binding and the library do not match"
-  done
-  echo "    ok  $(basename "$(dirname "$slice")")"
-done
+verify_binding_matches_xcframework "$NEW_XCF" "$BIND" "$LIBNAME" "$TMP"
 mkdir -p "$TMP/new" "$TMP/prev"
 cp "$BIND/laniakea.swift" "$BIND/laniakeaFFI.h" "$TMP/new/"
 

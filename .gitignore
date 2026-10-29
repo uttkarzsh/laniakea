@@ -19,3 +19,6 @@ xcuserdata/
 /Binaries/
 .build/
 .swiftpm/
+
+# Release assets built by scripts/release/build-asset.sh
+/dist/

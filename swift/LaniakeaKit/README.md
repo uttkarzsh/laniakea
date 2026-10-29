@@ -66,14 +66,17 @@ try proof.write(to: directory) // proof.json + public.json, for an independent v
 
 ## Package layout
 
-The Swift package is the repository's root `Package.swift` (local use only for now: no
-remote binary URL exists and nothing is published). Product `LaniakeaKit`; targets:
+The Swift package is the repository's root `Package.swift`. On development branches its
+binary target is local (`Binaries/LaniakeaRustLib.xcframework`, built by you); only a tagged
+release commit carries a remote `url:`/`checksum:` binary target, and **nothing is published
+yet** (see `docs/RELEASING.md` for the release workflow, the manifest switching and what has
+and has not been tested). Product `LaniakeaKit`; targets:
 
 ```
 LaniakeaKit (Swift, handwritten)  -> internal import _LaniakeaBindings
   _LaniakeaBindings (Swift, UniFFI-generated, committed)
     laniakeaFFI (C: the generated header; SwiftPM derives the module map)
-    LaniakeaRustLib (binary: Binaries/laniakeaFFI.xcframework, built locally, git-ignored)
+    LaniakeaRustLib (binary: Binaries/LaniakeaRustLib.xcframework, built locally, git-ignored)
 ```
 
 ```

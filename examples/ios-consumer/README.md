@@ -29,7 +29,7 @@ Needs full Xcode, a Rust toolchain with the iOS targets (`aarch64-apple-ios`,
 `aarch64-apple-ios-sim`), and `snarkjs` for the check below.
 
 ```sh
-scripts/package-xcframework.sh          # builds Binaries/laniakeaFFI.xcframework
+scripts/package-xcframework.sh          # builds Binaries/LaniakeaRustLib.xcframework
 examples/ios-consumer/prepare.sh        # circuit files, see above
 open examples/ios-consumer/LaniakeaConsumer.xcodeproj
 ```
@@ -37,6 +37,15 @@ open examples/ios-consumer/LaniakeaConsumer.xcodeproj
 Choose an iOS Simulator and run. For a device set your own signing team in Xcode (none is
 committed). The app targets iOS 16 (SwiftUI); the package declares iOS 15.0 and needs Swift tools 6.0
 (Xcode 16.0 or later; only Xcode 27.1 has been tested).
+
+## Validating as a remote consumer
+
+`scripts/release/validate-consumer.sh` copies this project to a temporary directory outside
+the repository, makes it depend on the package by repository URL and exact version, and
+repeats the builds, the simulator proofs, the snarkjs checks and the tamper check with fresh
+caches and no Rust on `PATH`. `--rehearse <version>` is an offline rehearsal with a local
+ZIP; `--remote <https URL> <version>` is the real HTTPS test, which has not been run because
+nothing is published. See `docs/RELEASING.md`.
 
 ## Export and verify
 

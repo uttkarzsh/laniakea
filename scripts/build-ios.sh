@@ -25,6 +25,9 @@
 #      generated from the iOS library itself are byte-identical (ABI consistency);
 #   6. stages everything under <target>/uniffi/ios-<min>/.
 #
+# Build paths are remapped (--remap-path-prefix) for the repository root, Cargo's home
+# and the Rust sysroot; see the comment above the cargo build loop.
+#
 # This compiles Rust only. Linking into an app, the simulator and devices need
 # Xcode and are NOT exercised here.
 set -euo pipefail
@@ -131,10 +134,25 @@ if bad:
 print("    %d artifact paths, all under the isolated directory" % n)
 PY
 }
+# Source paths that rustc embeds in the libraries (panic locations, debug info) are
+# remapped to fixed names, so a release binary does not carry the builder's home
+# directory: the repository root, Cargo's home (registry sources) and the Rust
+# sysroot. rustc applies the last matching mapping, and the three directories are
+# disjoint. CARGO_ENCODED_RUSTFLAGS (0x1f-separated) is used because the paths may
+# contain spaces; it takes precedence over RUSTFLAGS and over rustflags in Cargo
+# configuration files, so an existing RUSTFLAGS is refused rather than silently ignored.
+# Applied only to the iOS target builds below (not to `cargo tree` or the host
+# bindgen build), where it also becomes part of Cargo's fingerprint.
+[ -z "${RUSTFLAGS:-}" ] && [ -z "${CARGO_ENCODED_RUSTFLAGS:-}" ] \
+  || die "RUSTFLAGS/CARGO_ENCODED_RUSTFLAGS is set; this script sets its own flags (--remap-path-prefix). Unset it."
+SYSROOT_DIR="$("$RUSTC_BIN" --print sysroot)" || die "$RUSTC_BIN --print sysroot failed"
+CARGO_HOME_DIR="${CARGO_HOME:-$HOME/.cargo}"
+US=$'\037'
+REMAP_FLAGS="--remap-path-prefix=$ROOT=/laniakea${US}--remap-path-prefix=$CARGO_HOME_DIR=/cargo${US}--remap-path-prefix=$SYSROOT_DIR=/rust-sysroot"
 for t in $TARGETS; do
   echo "==> cargo build -p laniakea-uniffi --target $t --release (iOS min $MIN, target+build dir $IOS_TARGET_DIR)"
   msgs="$(mktemp)"
-  CARGO_TARGET_DIR="$IOS_TARGET_DIR" CARGO_BUILD_BUILD_DIR="$IOS_TARGET_DIR" \
+  CARGO_ENCODED_RUSTFLAGS="$REMAP_FLAGS" CARGO_TARGET_DIR="$IOS_TARGET_DIR" CARGO_BUILD_BUILD_DIR="$IOS_TARGET_DIR" \
     cargo build -p laniakea-uniffi --target "$t" --release --message-format=json-render-diagnostics >"$msgs" \
     || { rm -f "$msgs"; die "cargo build failed for $t"; }
   verify_artifact_paths "$msgs" || { rm -f "$msgs"; die "build isolation check failed for $t"; }

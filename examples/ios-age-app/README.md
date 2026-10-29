@@ -164,7 +164,7 @@ Finally snarkjs verifies the eligible proof and the (valid) ineligible proof.
 
 ```sh
 scripts/package-xcframework.sh
-# -> Binaries/laniakeaFFI.xcframework (used by the repository's root Package.swift) and the
+# -> Binaries/LaniakeaRustLib.xcframework (used by the repository's root Package.swift) and the
 #    committed generated sources, refreshed
 ```
 
@@ -216,7 +216,7 @@ created with Xcode's iOS App template, not hand-written.
 | Settings | Deployment target iOS 16.0; the Swift and concurrency settings in Concurrency above; bundle identifier `dev.laniakea.AgeCheckDemo`; automatic signing with no development team (see Signing below). |
 | Debug vs Release | Debug defines `DEBUG`. Release does not, so `LaunchOptions` and the `AGECHECK` trace are compiled out. |
 
-The package needs `Binaries/laniakeaFFI.xcframework`, which is git-ignored, so after a
+The package needs `Binaries/LaniakeaRustLib.xcframework`, which is git-ignored, so after a
 fresh checkout **run steps 1 and 3 before opening the project**.
 
 **Signing:** the project contains no development team ID and no signing identity

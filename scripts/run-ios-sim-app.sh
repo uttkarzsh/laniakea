@@ -3,7 +3,7 @@
 # and drive it through four scenarios, checking what the app reports.
 #
 # Usage:
-#   scripts/package-xcframework.sh        # first: builds Binaries/laniakeaFFI.xcframework
+#   scripts/package-xcframework.sh        # first: builds Binaries/LaniakeaRustLib.xcframework
 #   scripts/run-ios-sim-app.sh            # uses the one booted simulator
 #   SIM_DEVICE=<udid> scripts/run-ios-sim-app.sh
 #
@@ -40,7 +40,7 @@ done
 xcodebuild -version >/dev/null 2>&1 || die "xcodebuild is not usable (full Xcode is required)"
 
 ios_layout   # MIN, TARGET, STAGE: the package built by package-xcframework.sh
-XCF="$ROOT/Binaries/laniakeaFFI.xcframework"
+XCF="$ROOT/Binaries/LaniakeaRustLib.xcframework"
 KIT_SRC="$ROOT/swift/LaniakeaKit/Sources"
 BINDING="$KIT_SRC/_LaniakeaBindings/laniakea.swift"
 C_HEADERS="$KIT_SRC/laniakeaFFI/include"

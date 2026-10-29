@@ -30,6 +30,7 @@ The Rust proving pipeline, the UniFFI/Swift bindings, the iOS packaging scripts 
 | High-level `Prover` API | ✅ Inputs in, proof + public signals out; validated artifacts, point validation, structured errors |
 | UniFFI bindings (`LaniakeaProver`) | ✅ Swift bindings generated; macOS Swift smoke test passes, proof verified by snarkjs |
 | iOS static libraries + XCFramework + Swift package | ✅ Built with Xcode 27.1 (device + arm64 simulator slices). Consuming the package needs Swift tools 6.0, i.e. Xcode 16.0 or later (not tested below 27.1) |
+| Remote Swift Package distribution | ⚠️ Release tooling and an offline rehearsal exist (`docs/RELEASING.md`); **nothing is published** and the HTTPS download/checksum path is untested. Licensing is unresolved |
 | SwiftUI age-check demo | ✅ Xcode project builds; runs on the iPhone Duo simulator |
 
 **Not yet complete:**
@@ -311,12 +312,14 @@ scripts/
 ├── build-ios.sh                  # Build + verify iOS static libraries
 ├── package-xcframework.sh        # Headerless XCFramework + refresh of the Swift package inputs
 ├── check-bindings.sh             # Committed generated sources == fresh generation
+├── release/                      # build-asset.sh, set-binary-target.sh, validate-consumer.sh (docs/RELEASING.md)
 ├── prepare-ios-app-resources.sh  # Copy/verify the demo app's resources
 ├── swift-sdk-test.sh             # macOS tests for the LaniakeaKit Swift API
 ├── swift-app-logic-test.sh       # macOS logic tests for the demo app
 └── run-ios-sim-app.sh            # Scripted simulator build/run harness
 
-Package.swift                     # Swift package (local): LaniakeaKit over generated _LaniakeaBindings
+Package.swift                     # Swift package (local binary target on development branches): LaniakeaKit over generated _LaniakeaBindings
+docs/RELEASING.md                 # release workflow, manifest forms, tested vs declared versions, open decisions
 swift/LaniakeaKit/                # the handwritten Swift API (Sources/LaniakeaKit), the committed
 │                                 # generated sources (_LaniakeaBindings, laniakeaFFI) and tests
 
