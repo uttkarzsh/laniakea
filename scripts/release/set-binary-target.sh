@@ -10,7 +10,7 @@
 #       .binaryTarget(name: "LaniakeaRustLib", url: "<URL>", checksum: "<SHA256>")
 #       The RELEASE form. It belongs only in a release commit, the one a version tag
 #       points at, and only after the asset at <URL> exists and <SHA256> is the
-#       `swift package compute-checksum` of exactly that file (see docs/RELEASING.md).
+#       `swift package compute-checksum` of exactly that file (see the Releasing section of README.md).
 #       <URL> must be https and end in /<V>/LaniakeaRustLib-<V>.xcframework.zip.
 #
 #   --manifest <path>   edit another Package.swift (default: the repository's root one)

@@ -18,6 +18,9 @@ struct ContentView: View {
                     Section("Result") {
                         LabeledContent("Public signals", value: proof.publicSignals.joined(separator: ", "))
                         if let outcome = model.outcome { Text(outcome) }
+                        if let measurements = model.measurements {
+                            Text(measurements).font(.footnote).monospacedDigit()
+                        }
                         Text("Two separate questions. Is the proof valid? Not checked here: this app only generates it; a verifier must check it. Is the person eligible? Only the public signal out says so (1 = yes), and a valid proof also exists when out = 0.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)

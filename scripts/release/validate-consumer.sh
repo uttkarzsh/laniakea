@@ -19,6 +19,13 @@
 #       Rust. It does NOT exercise an HTTPS download or the binary-target checksum:
 #       SwiftPM verifies a checksum only for a remote url: target.
 #
+#       With ASSET_URL_BASE=https://host:port/path set (the ZIP served at
+#       $ASSET_URL_BASE/<version>/LaniakeaRustLib-<version>.xcframework.zip), the binary target
+#       is a url: target instead, so SwiftPM downloads the ZIP and verifies its checksum; see
+#       scripts/release/serve-asset-https.sh for a local server. Still a local git repository.
+#       ASSET_CHECKSUM=<64 hex digits> replaces the computed checksum, to check that SwiftPM
+#       rejects a mismatch (the run must then fail at package resolution).
+#
 #   scripts/release/validate-consumer.sh --remote <https-repository-URL> <version>
 #       REAL REMOTE. The same fixture resolves the published repository by https URL and
 #       exact version; SwiftPM downloads the release asset over HTTPS and checks its
@@ -79,14 +86,22 @@ if [ "$MODE" = "--rehearse" ]; then
     [ -f "$ROOT/$f" ] || continue
     mkdir -p "$RE/$(dirname "$f")"; cp -p "$ROOT/$f" "$RE/$f"
   done
-  cp "$ZIP" "$RE/$ASSET"
-  python3 - "$RE/Package.swift" "$ASSET" <<'PY'
+  if [ -z "${ASSET_URL_BASE:-}" ]; then cp "$ZIP" "$RE/$ASSET"; fi
+  if [ -n "${ASSET_URL_BASE:-}" ]; then
+    # The binary target downloads the asset over HTTPS and SwiftPM checks its checksum.
+    case "$ASSET_URL_BASE" in https://*) ;; *) die "ASSET_URL_BASE must be an https:// URL" ;; esac
+    TARGET_LINE="url: \"${ASSET_URL_BASE%/}/$VERSION/$ASSET\", checksum: \"${ASSET_CHECKSUM:-$(swift package compute-checksum "$ZIP")}\""
+    BANNER="HTTPS ASSET REHEARSAL (local git repository; asset downloaded from $ASSET_URL_BASE, checksum verified by SwiftPM)"
+  else
+    TARGET_LINE="path: \"$ASSET\""
+  fi
+  python3 - "$RE/Package.swift" "$TARGET_LINE" <<'PY'
 import re, sys
-p, asset = sys.argv[1:3]
+p, target = sys.argv[1:3]
 t = open(p).read()
 pat = re.compile(r'^( *)\.binaryTarget\(name: "LaniakeaRustLib",[^\n]*\),\n', re.M)
 assert len(pat.findall(t)) == 1
-open(p, "w").write(pat.sub(lambda m: '%s.binaryTarget(name: "LaniakeaRustLib", path: "%s"),\n' % (m.group(1), asset), t, count=1))
+open(p, "w").write(pat.sub(lambda m: '%s.binaryTarget(name: "LaniakeaRustLib", %s),\n' % (m.group(1), target), t, count=1))
 PY
   export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
   git -C "$RE" init -q -b main
@@ -108,26 +123,7 @@ cp -R "$ROOT/examples/ios-consumer/LaniakeaConsumer.xcodeproj" "$ROOT/examples/i
 rm -rf "$FIX/LaniakeaConsumer/Resources"; mkdir -p "$FIX/LaniakeaConsumer/Resources"
 cp "$ART" "$FIX/LaniakeaConsumer/Resources/age_check.artifact"
 cp "$WASM" "$FIX/LaniakeaConsumer/Resources/age_check.wasm"
-python3 - "$FIX/LaniakeaConsumer.xcodeproj/project.pbxproj" "$REPO_URL" "$VERSION" <<'PY'
-import re, sys
-p, url, version = sys.argv[1:4]
-t = open(p).read()
-ref = "A116A76F308F54F6006A1B03"
-old_comment = '/* XCLocalSwiftPackageReference "../.." */'
-new_comment = '/* XCRemoteSwiftPackageReference "laniakea" */'
-assert t.count(old_comment) == 2, t.count(old_comment)
-t = t.replace(old_comment, new_comment)
-t = t.replace("/* Begin XCLocalSwiftPackageReference section */", "/* Begin XCRemoteSwiftPackageReference section */")
-t = t.replace("/* End XCLocalSwiftPackageReference section */", "/* End XCRemoteSwiftPackageReference section */")
-t = t.replace('isa = XCLocalSwiftPackageReference;\n\t\t\trelativePath = "../..";',
-              'isa = XCRemoteSwiftPackageReference;\n\t\t\trepositoryURL = "%s";\n\t\t\trequirement = {\n\t\t\t\tkind = exactVersion;\n\t\t\t\tversion = "%s";\n\t\t\t};' % (url, version))
-assert "XCLocalSwiftPackageReference" not in t and "exactVersion" in t
-# the product dependency must name its package
-t = t.replace("isa = XCSwiftPackageProductDependency;\n\t\t\tproductName = LaniakeaKit;",
-              "isa = XCSwiftPackageProductDependency;\n\t\t\tpackage = %s %s;\n\t\t\tproductName = LaniakeaKit;" % (ref, new_comment))
-assert "package = %s" % ref in t
-open(p, "w").write(t)
-PY
+"$ROOT/examples/ios-consumer/package-source.sh" remote --exact "$VERSION" --url "$REPO_URL" --project "$FIX/LaniakeaConsumer.xcodeproj/project.pbxproj" >/dev/null
 
 # --- builds with fresh caches and no Rust toolchain on PATH
 PROJ="$FIX/LaniakeaConsumer.xcodeproj"

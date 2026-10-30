@@ -49,7 +49,9 @@ let package = Package(
         .target(
             name: "LaniakeaKit",
             dependencies: ["_LaniakeaBindings"],
-            path: "swift/LaniakeaKit/Sources/LaniakeaKit"
+            path: "swift/LaniakeaKit/Sources/LaniakeaKit",
+            // Apple privacy manifest; it lands in the app as Laniakea_LaniakeaKit.bundle.
+            resources: [.copy("PrivacyInfo.xcprivacy")]
         ),
     ],
     // UniFFI 0.28.3's generated code does not compile in Swift 6 language mode.

@@ -1,3 +1,18 @@
+// Adapted from `ark-circom` 0.1.0, `src/circom/qap.rs`
+// (https://github.com/gakonst/ark-circom; crates.io `ark-circom` 0.1.0, published from commit 170b10fc9ed1;
+// vendored in this repository under `vendor/ark-circom`).
+//
+// Upstream licence: MIT OR Apache-2.0. Copyright (c) 2021 Georgios Konstantopoulos. Used here under the
+// MIT licence; the upstream notice and licence text are reproduced in `THIRD_PARTY_NOTICES.md` and in
+// `vendor/ark-circom/LICENSE-MIT`. Laniakea's own MIT licence (`LICENSE`) does not cover this adapted
+// implementation, and its author does not claim authorship of it.
+//
+// Modifications from upstream: imports were replaced by fully qualified paths, the documentation
+// comment was rewritten, and two inline comments were removed. Apart from those, the code's token
+// sequence is identical to upstream's (comments, imports and path prefixes excluded). Behaviour is
+// checked by `tests/circom_reduction_compare.rs` and by snarkjs verification of generated proofs; no
+// semantic equivalence beyond that is claimed here.
+
 use ark_ff::PrimeField;
 use ark_poly::EvaluationDomain;
 use ark_relations::r1cs::{ConstraintMatrices, SynthesisError};

@@ -13,14 +13,25 @@
 #      validates and installs Binaries/LaniakeaRustLib.xcframework, and runs
 #      scripts/check-bindings.sh. (This replaces your local Binaries/ copy.) The tree must
 #      still be clean afterwards, i.e. the committed bindings were already current;
-#   3. zips the XCFramework with the .xcframework directory at the archive root;
+#   3. zips the XCFramework with the .xcframework directory at the archive root, plus any
+#      licence and notice files found at the repository root (LICENSE*, NOTICE*,
+#      THIRD_PARTY_NOTICES*; tracked files only). The archive is deterministic: the files
+#      are copied to a staging directory with normalized modes and a fixed modification time,
+#      listed in sorted order and stored by `zip -X` with TZ=UTC, and the script builds it
+#      twice and requires identical bytes;
 #   4. computes the checksum with `swift package compute-checksum` on that exact file;
-#   5. extracts that exact ZIP into a fresh directory and validates the extracted copy:
-#      only the expected files, slices, platform variants, architectures, the minimum
+#   5. validates that exact ZIP: its entry list is exactly the expected files (no directory
+#      entries, resource forks, absolute or `..` paths), `unzip -t` passes, and the extracted
+#      copy has the expected files, slices, platform variants, architectures, the minimum
 #      deployment target of this project's objects, identity with the freshly staged
-#      libraries, no builder paths, and that the committed binding and header are exactly
-#      what bindgen generates from each extracted library;
+#      libraries, no builder paths (the home directory, the repository root, any /Users/ path),
+#      and the committed binding and header are exactly what bindgen generates from each
+#      extracted library;
 #   6. writes RELEASE-INFO.txt.
+#
+# REQUIRE_NOTICES=1 makes the build fail unless a LICENSE* file and a THIRD_PARTY_NOTICES*
+# file are present (the pre-release script sets it). Without it, a missing set is a loud
+# warning and RELEASE-INFO.txt says the asset ships without notices.
 #
 # Everything is assembled in a hidden temporary directory inside dist/ and renamed to
 # dist/<version>/ only at the end; on failure it is removed and nothing else is touched
@@ -74,10 +85,37 @@ LIBNAME=liblaniakea_uniffi.a
 XCFNAME=LaniakeaRustLib.xcframework
 ASSET="LaniakeaRustLib-$VERSION.xcframework.zip"
 
-echo "==> creating $ASSET"
-# The archive holds only the .xcframework directory (--keepParent), without resource
-# forks, extended attributes, quarantine flags or ACLs.
-ditto -c -k --keepParent --norsrc --noextattr --noqtn --noacl "$ROOT/Binaries/$XCFNAME" "$WORK/$ASSET"
+# Licence and notice files at the repository root go into the archive root, next to the
+# XCFramework. Only tracked files count.
+NOTICES=()
+while IFS= read -r f; do NOTICES+=("$f"); done < <(git ls-files -- ':(top)LICENSE*' ':(top)NOTICE*' ':(top)THIRD_PARTY_NOTICES*' | grep -v / | LC_ALL=C sort)
+has_license=0; has_third=0
+for f in ${NOTICES[@]+"${NOTICES[@]}"}; do
+  case "$f" in LICENSE*) has_license=1 ;; THIRD_PARTY_NOTICES*) has_third=1 ;; esac
+done
+if [ "$has_license" = 0 ] || [ "$has_third" = 0 ]; then
+  echo "WARNING: no LICENSE* file and/or no THIRD_PARTY_NOTICES* file at the repository root: this asset would ship without them (see README.md, "License")" >&2
+  [ "${REQUIRE_NOTICES:-0}" != 1 ] || die "REQUIRE_NOTICES=1 but the licence and third-party notice files are missing"
+fi
+
+echo "==> creating $ASSET (deterministic)"
+SCRATCH="$WORK/scratch"   # validation work files; never part of the output
+STAGEZ="$SCRATCH/zipstage"
+mkdir -p "$STAGEZ"
+cp -R "$ROOT/Binaries/$XCFNAME" "$STAGEZ/$XCFNAME"
+for f in ${NOTICES[@]+"${NOTICES[@]}"}; do cp "$ROOT/$f" "$STAGEZ/$f"; done
+# Normalized: no extended attributes, modes 755/644, one fixed modification time.
+xattr -cr "$STAGEZ" 2>/dev/null || true
+find "$STAGEZ" -type d -exec chmod 755 {} +
+find "$STAGEZ" -type f -exec chmod 644 {} +
+find "$STAGEZ" -exec touch -h -t 198001010000 {} +
+make_zip() { # <output>
+  rm -f "$1"
+  ( cd "$STAGEZ" && find . -type f | sed 's|^\./||' | LC_ALL=C sort | TZ=UTC zip -X -q -9 -D "$1" -@ )
+}
+make_zip "$WORK/$ASSET"
+make_zip "$SCRATCH/second.zip"
+cmp -s "$WORK/$ASSET" "$SCRATCH/second.zip" || die "two archives built from identical inputs differ; the archive is not deterministic"
 
 echo "==> swift package compute-checksum"
 CHECKSUM="$(cd "$WORK" && swift package compute-checksum "$ASSET")"
@@ -85,15 +123,27 @@ grep -Eq '^[0-9a-f]{64}$' <<<"$CHECKSUM" || die "unexpected checksum output: $CH
 ZIP_SHA="$(shasum -a 256 "$WORK/$ASSET" | awk '{print $1}')"
 [ "$CHECKSUM" = "$ZIP_SHA" ] || echo "note: SwiftPM checksum and shasum differ ($CHECKSUM vs $ZIP_SHA); the SwiftPM value is the one to use"
 
+echo "==> validating the ZIP"
+unzip -tq "$WORK/$ASSET" >/dev/null || die "unzip -t failed for $ASSET"
+EXPECTED_LIST="$( { (cd "$STAGEZ" && find . -type f | sed 's|^\./||'); } | LC_ALL=C sort)"
+ACTUAL_LIST="$(unzip -Z1 "$WORK/$ASSET" | LC_ALL=C sort)"
+[ "$EXPECTED_LIST" = "$ACTUAL_LIST" ] || die "the ZIP's entries differ from the staged files:
+expected:
+$EXPECTED_LIST
+actual:
+$ACTUAL_LIST"
+if grep -Eq '(^/|(^|/)\.\.(/|$)|__MACOSX|\.DS_Store|/$)' <<<"$ACTUAL_LIST"; then die "the ZIP contains an absolute or parent path, a resource fork, a .DS_Store or a directory entry"; fi
+echo "  ok  $(wc -l <<<"$ACTUAL_LIST" | tr -d ' ') entries: $(tr '\n' ' ' <<<"$ACTUAL_LIST" | cut -c1-300)"
 echo "==> re-extracting the ZIP and validating the extracted copy"
-SCRATCH="$WORK/scratch"   # validation work files; never part of the output
 EXT="$SCRATCH/extracted"
 mkdir -p "$EXT"
 ditto -x -k "$WORK/$ASSET" "$EXT"
-[ "$(ls -A "$EXT")" = "$XCFNAME" ] || die "the ZIP root must contain exactly $XCFNAME, found: $(ls -A "$EXT" | tr '\n' ' ')"
+EXPECTED_ROOT="$( { echo "$XCFNAME"; for f in ${NOTICES[@]+"${NOTICES[@]}"}; do echo "$f"; done; } | LC_ALL=C sort)"
+[ "$(ls -A "$EXT" | LC_ALL=C sort)" = "$EXPECTED_ROOT" ] || die "the ZIP root must contain exactly: $(tr '\n' ' ' <<<"$EXPECTED_ROOT"); found: $(ls -A "$EXT" | tr '\n' ' ')"
 diff -r "$EXT/$XCFNAME" "$ROOT/Binaries/$XCFNAME" >/dev/null || die "the extracted XCFramework differs from the packaged one"
+for f in ${NOTICES[@]+"${NOTICES[@]}"}; do cmp -s "$EXT/$f" "$ROOT/$f" || die "the archived $f differs from the repository's"; done
 validate_xcframework "$EXT/$XCFNAME" "$STAGE" "$LIBNAME" "$MIN" "ios-arm64-simulator" "arm64" "$SCRATCH"
-check_no_builder_paths "$EXT/$XCFNAME" "$HOME" "$ROOT"
+check_no_builder_paths "$EXT/$XCFNAME" "$HOME" "$ROOT" "/Users/"
 echo "==> binding and header against the extracted libraries"
 mkdir "$SCRATCH/committed"
 cp "$ROOT/swift/LaniakeaKit/Sources/_LaniakeaBindings/laniakea.swift" "$ROOT/swift/LaniakeaKit/Sources/laniakeaFFI/include/laniakeaFFI.h" "$SCRATCH/committed/"
@@ -123,6 +173,11 @@ uniffi_ver="$(awk '/^name = "uniffi"$/{getline; print $3; exit}' Cargo.lock | tr
   done
   echo "  Info.plist  $(shasum -a 256 "$EXT/$XCFNAME/Info.plist" | awk '{print $1}')"
   echo
+  echo "licence and notice files in the archive:"
+  if [ "${#NOTICES[@]}" -eq 0 ]; then echo "  NONE (this asset ships without licence or notice files)"; fi
+  for f in ${NOTICES[@]+"${NOTICES[@]}"}; do echo "  $f  $(shasum -a 256 "$EXT/$f" | awk '{print $1}')"; done
+  echo "archive entries: $(wc -l <<<"$ACTUAL_LIST" | tr -d ' ') (stored deterministically; two builds from the same inputs on this machine were byte-identical)"
+  echo
   echo "committed generated files (sha256), validated against the libraries above:"
   echo "  laniakea.swift    $(shasum -a 256 "$SCRATCH/committed/laniakea.swift" | awk '{print $1}')"
   echo "  laniakeaFFI.h     $(shasum -a 256 "$SCRATCH/committed/laniakeaFFI.h" | awk '{print $1}')"
@@ -135,9 +190,10 @@ uniffi_ver="$(awk '/^name = "uniffi"$/{getline; print $3; exit}' Cargo.lock | tr
   echo "  $(swift --version 2>&1 | head -1)"
   echo "  $(sw_vers -productName) $(sw_vers -productVersion) $(uname -m)"
   echo
-  echo "Reproducibility: this file does not claim the asset is reproducible on another"
-  echo "machine or toolchain; that has not been tested."
-  echo "Tested: see docs/RELEASING.md (declared minimums versus tested versions)."
+  echo "Reproducibility: the archive format is deterministic for identical inputs (checked"
+  echo "twice within this build). Whether the libraries inside are reproducible across"
+  echo "machines or toolchains has not been tested and is not claimed."
+  echo "Tested: see docs/INTEGRATION.md (declared minimums versus tested versions)."
 } > "$WORK/RELEASE-INFO.txt"
 rm -rf "$SCRATCH"
 
@@ -150,6 +206,6 @@ echo
 echo "OK: $OUT"
 echo "    $ASSET"
 echo "    swiftpm checksum: $CHECKSUM"
-echo "Nothing was tagged, committed, pushed or uploaded. Next (manual, see docs/RELEASING.md):"
+echo "Nothing was tagged, committed, pushed or uploaded. Next (manual, see the Releasing section of README.md):"
 echo "  upload the ZIP as a release asset, then in the release commit run"
 echo "  scripts/release/set-binary-target.sh --remote --version $VERSION --url <asset URL> --checksum $CHECKSUM"

@@ -1,0 +1,9 @@
+crate	version	file	upstream_url	sha256
+ark-snark	0.4.0	ark-snark-0.4.0.LICENSE-MIT	https://raw.githubusercontent.com/arkworks-rs/snark/v0.4.0/LICENSE-MIT	8f71659370c5268d9a1dc962a46232540e8fca63462586d8efaa95aab492a208
+ark-snark	0.4.0	ark-snark-0.4.0.LICENSE-APACHE	https://raw.githubusercontent.com/arkworks-rs/snark/v0.4.0/LICENSE-APACHE	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2
+wasmi,wasmi_collections,wasmi_core,wasmi_ir	2.0.0	wasmi-2.0.0.LICENSE-MIT	https://raw.githubusercontent.com/wasmi-labs/wasmi/v2.0.0/LICENSE-MIT	172bc1497507c1c363496bc23b0f16de8fa8e94befa85db6c8d9fa790e0a8657
+wasmi,wasmi_collections,wasmi_core,wasmi_ir	2.0.0	wasmi-2.0.0.LICENSE-APACHE	https://raw.githubusercontent.com/wasmi-labs/wasmi/v2.0.0/LICENSE-APACHE	f031c1608e4a19e8cbcc3394cdba838067e79189610227459e8ffcd669e6f52d
+wasmparser	0.228.0	wasm-tools-1.228.0.LICENSE-MIT	https://raw.githubusercontent.com/bytecodealliance/wasm-tools/v1.228.0/LICENSE-MIT	23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
+wasmparser	0.228.0	wasm-tools-1.228.0.LICENSE-APACHE	https://raw.githubusercontent.com/bytecodealliance/wasm-tools/v1.228.0/LICENSE-APACHE	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2
+wasmparser	0.228.0	wasm-tools-1.228.0.LICENSE-Apache-2.0_WITH_LLVM-exception	https://raw.githubusercontent.com/bytecodealliance/wasm-tools/v1.228.0/LICENSE-Apache-2.0_WITH_LLVM-exception	268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5
+uniffi,uniffi_core,uniffi_meta	0.28.3	uniffi-rs-0.28.3.LICENSE-MPL-2.0	https://raw.githubusercontent.com/mozilla/uniffi-rs/v0.28.3/LICENSE	1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5

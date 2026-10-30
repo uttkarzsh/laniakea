@@ -19,9 +19,12 @@ final class ProofModel: ObservableObject {
     @Published private(set) var phase: Phase = .loading
     @Published private(set) var proof: Proof?
     @Published private(set) var exportMessage: String?
+    /// Wall-clock times and process memory of the last load and proof, for reading on a device.
+    @Published private(set) var measurements: String?
     @Published var ageText = ""
 
     private var prover: Prover?
+    private var loadSeconds: Double?
 
     /// What the public signals say: `out` is `publicSignals[0]`. A *valid* proof exists
     /// for both answers, so this is read from the signals, never from "proving worked".
@@ -40,9 +43,11 @@ final class ProofModel: ObservableObject {
         // WASM compilation) are both off the main thread: `Prover` is an actor whose
         // synchronous Rust work runs on the cooperative pool, and the file reads go in
         // a detached task.
+        let start = ContinuousClock.now
         do {
             let circuit = try await Task.detached { try Circuit(name: "age_check") }.value
             prover = try await Prover(circuit: circuit)
+            loadSeconds = start.duration(to: .now).seconds
             phase = .ready
         } catch {
             phase = .failed(describe(error))
@@ -57,8 +62,10 @@ final class ProofModel: ObservableObject {
         phase = .proving
         proof = nil
         exportMessage = nil
+        let start = ContinuousClock.now
         do {
             proof = try await prover.prove(["age": .integer(age), "threshold": .integer(Self.threshold)])
+            measurements = Self.describe(loadSeconds: loadSeconds, proveSeconds: start.duration(to: .now).seconds)
             phase = .ready
         } catch {
             phase = .failed(describe(error))
@@ -75,6 +82,15 @@ final class ProofModel: ObservableObject {
         } catch {
             exportMessage = describe(error)
         }
+    }
+
+    private static func describe(loadSeconds: Double?, proveSeconds: Double) -> String {
+        var parts = [String(format: "prove %.3f s", proveSeconds)]
+        if let loadSeconds { parts.insert(String(format: "load %.3f s", loadSeconds), at: 0) }
+        if let memory = Memory.footprintMB() {
+            parts.append(String(format: "memory now %.0f MB, peak %.0f MB", memory.current, memory.peak))
+        }
+        return parts.joined(separator: ", ")
     }
 
     private func describe(_ error: any Error) -> String {
@@ -94,7 +110,7 @@ final class ProofModel: ObservableObject {
         await load()
         ageText = age
         await prove()
-        var lines = ["age=\(age) signals=\(proof?.publicSignals ?? []) phase=\(phase) outcome=\(outcome ?? "-")"]
+        var lines = ["age=\(age) signals=\(proof?.publicSignals ?? []) phase=\(phase) outcome=\(outcome ?? "-") measurements=\(measurements ?? "-")"]
         if defaults.bool(forKey: "ConsumerAutoExport") {
             export()
             lines.append("export: \(exportMessage ?? "-")")
@@ -104,4 +120,23 @@ final class ProofModel: ObservableObject {
         }
     }
     #endif
+}
+
+private extension Duration {
+    var seconds: Double { Double(components.seconds) + Double(components.attoseconds) / 1e18 }
+}
+
+/// Physical memory footprint of this process (what iOS counts against the app's limit).
+enum Memory {
+    static func footprintMB() -> (current: Double, peak: Double)? {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return nil }
+        return (Double(info.phys_footprint) / 1_048_576, Double(info.ledger_phys_footprint_peak) / 1_048_576)
+    }
 }

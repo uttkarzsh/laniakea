@@ -97,7 +97,7 @@
 			mainGroup = A116A748308F5223006A1B03;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				A116A76F308F54F6006A1B03 /* XCLocalSwiftPackageReference "../.." */,
+				A116A76F308F54F6006A1B03 /* XCRemoteSwiftPackageReference "laniakea" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A116A752308F5223006A1B03 /* Products */;
@@ -324,16 +324,21 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCLocalSwiftPackageReference section */
-		A116A76F308F54F6006A1B03 /* XCLocalSwiftPackageReference "../.." */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = "../..";
+/* Begin XCRemoteSwiftPackageReference section */
+		A116A76F308F54F6006A1B03 /* XCRemoteSwiftPackageReference "laniakea" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/uttkarzsh/laniakea.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = "0.1.0";
+			};
 		};
-/* End XCLocalSwiftPackageReference section */
+/* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		C0000000000000000000A002 /* LaniakeaKit */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = A116A76F308F54F6006A1B03 /* XCRemoteSwiftPackageReference "laniakea" */;
 			productName = LaniakeaKit;
 		};
 /* End XCSwiftPackageProductDependency section */

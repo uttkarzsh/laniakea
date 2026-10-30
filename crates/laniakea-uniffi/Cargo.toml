@@ -2,6 +2,7 @@
 name = "laniakea-uniffi"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 
 [lib]
 # `lib` for Rust tests and dependents; `staticlib` for linking into an iOS app.

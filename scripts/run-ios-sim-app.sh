@@ -53,6 +53,21 @@ APP_MIN="${APP_DEPLOYMENT_TARGET:-16.0}"   # SwiftUI APIs used need iOS 16
 BUNDLE_ID="${BUNDLE_ID:-dev.laniakea.AgeCheckApp}"
 WORK="$TARGET/uniffi/ios-app-sim"
 APP="$WORK/AgeCheckApp.app"
+# Where `simctl launch --stdout/--stderr` writes the app's trace. The simulator
+# process must be able to create these files, and it cannot under /private/tmp
+# (checked: the same launch writes under $HOME and fails under /private/tmp, so a
+# checkout there gets no trace at all). Default: next to the build; for a checkout
+# under /tmp or /private/tmp, a directory under ~/Library/Caches. Override with
+# SIM_LOG_DIR; the directory must be writable by the simulator.
+if [ -n "${SIM_LOG_DIR:-}" ]; then
+  LOGS="$SIM_LOG_DIR"
+else
+  case "$WORK" in
+    /tmp/*|/private/tmp/*) LOGS="$HOME/Library/Caches/laniakea/ios-app-sim-logs" ;;
+    *) LOGS="$WORK" ;;
+  esac
+fi
+mkdir -p "$LOGS"
 TRIPLE="arm64-apple-ios$APP_MIN-simulator"
 SDK="$(xcrun --sdk iphonesimulator --show-sdk-path)"
 # As Xcode does. Without it the clang link driver falls back to the macOS SDK for
@@ -186,7 +201,8 @@ xcrun simctl install "$UDID" "$APP"
 
 # scenario: launch argument, then the trace line that must appear
 run_scenario() { # $1 = age text, $2 = name, $3 = required final line (regex)
-  local age=$1 name=$2 want=$3 err="$WORK/$2.stderr" out="$WORK/$2.stdout" line i
+  local age=$1 name=$2 want=$3 err="$LOGS/$2.stderr" out="$LOGS/$2.stdout" line i
+  rm -f "$out" "$err"   # no stale trace from an earlier run can satisfy the check
   xcrun simctl launch --terminate-running-process --stdout="$out" --stderr="$err" \
     "$UDID" "$BUNDLE_ID" -AgeCheckAutoProveAge "$age" >/dev/null
   line=""
@@ -199,7 +215,11 @@ run_scenario() { # $1 = age text, $2 = name, $3 = required final line (regex)
   xcrun simctl io "$UDID" screenshot "$WORK/$name.png" >/dev/null 2>&1 || echo "    (screenshot failed)"
   xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
   echo "    trace: $(tr '\n' '|' < "$err")"
-  [ -n "$line" ] || { echo "  FAIL $name: no result within 60 s"; return 1; }
+  if [ -z "$line" ]; then
+    echo "  FAIL $name: no result within 60 s"
+    [ -e "$err" ] || echo "    $err was never created: the simulator may not be able to write to $LOGS (set SIM_LOG_DIR to a directory under \$HOME)"
+    return 1
+  fi
   if grep -Eq "$want" <<<"$line"; then
     echo "  ok   $name: $line"
   else
@@ -218,7 +238,7 @@ run_scenario 10 ineligible '^AGECHECK result notEligible signals=\["0", "18"\] .
 run_scenario 256 out-of-range '^AGECHECK input-rejected outOfRange$' || fail=1
 run_scenario abc not-a-number '^AGECHECK input-rejected notANumber$' || fail=1
 for name in out-of-range not-a-number; do
-  if grep -q '^AGECHECK proving' "$WORK/$name.stderr"; then
+  if grep -q '^AGECHECK proving' "$LOGS/$name.stderr"; then
     echo "  FAIL $name: the prover was invoked"; fail=1
   fi
 done

@@ -2,7 +2,7 @@
 
 The Swift API over the Rust prover: `Circuit`, `Prover`, `Proof`, `Input`,
 `LaniakeaError` (`Sources/LaniakeaKit`, handwritten, checked in), on top of the
-UniFFI-generated binding and the Rust static library. Not published: for now the package
+UniFFI-generated binding and the Rust static library. How to add it to an app: `docs/INTEGRATION.md`. Not published yet: for now the package
 is assembled locally (below). Circuit files stay outside the SDK binary.
 
 ```swift
@@ -64,6 +64,10 @@ try proof.write(to: directory) // proof.json + public.json, for an independent v
   `.unsupportedArtifactVersion(found:supported:)`; a missing header (an artifact from before
   format 1: re-export it with `export_artifact`), truncation, trailing bytes or a malformed
   payload are `.invalidArtifact`. This is not an integrity check.
+- **You own the circuit.** The SDK is circuit-independent and ships none: the circuit's source, trusted setup, verification
+  key, licensing and the meaning of its public signals are the app developer's responsibility (`docs/INTEGRATION.md`). Making the
+  `.artifact` from the circuit's `.zkey` needs the repository's Rust CLI on a development machine (`docs/INTEGRATION.md`).
+- **Licensing.** MIT for the original code (`LICENSE`); third-party attributions and open questions in `THIRD_PARTY_NOTICES.md`.
 - **A `Circuit` is only two blobs.** The artifact carries no circuit identity, so a WASM
   from another circuit is not always detected. Keep the pair from one build.
 - **Tests:** `scripts/swift-sdk-test.sh` (macOS host; `REQUIRE_SNARKJS=1` to require the
@@ -74,7 +78,7 @@ try proof.write(to: directory) // proof.json + public.json, for an independent v
 The Swift package is the repository's root `Package.swift`. On development branches its
 binary target is local (`Binaries/LaniakeaRustLib.xcframework`, built by you); only a tagged
 release commit carries a remote `url:`/`checksum:` binary target, and **nothing is published
-yet** (see `docs/RELEASING.md` for the release workflow, the manifest switching and what has
+yet** (see the "Releasing" section of the root `README.md` for the release workflow, the manifest switching and what has
 and has not been tested). Product `LaniakeaKit`; targets:
 
 ```
