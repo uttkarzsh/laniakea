@@ -4,6 +4,7 @@ pub mod api;
 pub mod artifacts;
 pub mod backend;
 pub mod error;
+pub mod verifier;
 pub mod witness;
 #[cfg(not(target_os = "ios"))]
 pub mod witness_ark;
@@ -19,4 +20,5 @@ pub use artifacts::{
 pub use backend::groth16::Groth16Backend;
 pub use backend::{ProofOutput, ProvingArtifacts, WitnessInputs, ZkBackend};
 pub use error::{CircuitLoadError, LaniakeaError, PointFault, WitnessError};
+pub use verifier::{VerificationError, Verifier};
 pub use witness::{WitnessArtifacts, WitnessCalculator};

@@ -1,7 +1,7 @@
 # LaniakeaKit
 
-The Swift API over the Rust prover: `Circuit`, `Prover`, `Proof`, `Input`,
-`LaniakeaError` (`Sources/LaniakeaKit`, handwritten, checked in), on top of the
+The Swift API over the Rust prover and verifier: `Circuit`, `Prover`, `Proof`, `Input`,
+`LaniakeaError`, `Verifier`, `VerificationError` (`Sources/LaniakeaKit`, handwritten, checked in), on top of the
 UniFFI-generated binding and the Rust static library. How to add it to an app: `docs/INTEGRATION.md`. Not published yet: for now the package
 is assembled locally (below). Circuit files stay outside the SDK binary.
 

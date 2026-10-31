@@ -1,7 +1,7 @@
 // swift-tools-version:6.0
 //
 // Laniakea: on-device Circom/Groth16 proving for iOS. The supported API is the product
-// `LaniakeaKit` (`import LaniakeaKit`): Circuit, Prover, Proof, Input, LaniakeaError.
+// `LaniakeaKit` (`import LaniakeaKit`): Circuit, Prover, Proof, Input, LaniakeaError, Verifier.
 //
 // Targets, from the bottom:
 //   LaniakeaRustLib   binary: the Rust static libraries (ios-arm64 and ios-arm64-simulator),

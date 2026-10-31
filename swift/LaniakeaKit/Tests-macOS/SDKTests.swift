@@ -1,11 +1,13 @@
-// Host tests for the LaniakeaKit Swift layer (Circuit, Prover, Proof, Input,
+// Host tests for the LaniakeaKit Swift layer (Circuit, Prover, Verifier, Proof, Input,
 // LaniakeaError), run on macOS by scripts/swift-sdk-test.sh. The layer is built as
 // the module `LaniakeaKit` with testing enabled, on top of the generated bindings
 // built as module `Laniakea`, as the Swift package arranges them. XCTest is not
 // used; failures are counted and reported through the exit code.
 //
-// Usage: SDKTests <resources-dir> <out-dir> <other-circuit.wasm>
-//   reads  <resources-dir>/age_check.artifact and age_check.wasm (the demo's copies)
+// Usage: SDKTests <resources-dir> <out-dir> <other-circuit.wasm> <verification_key.json> <snarkjs-fixtures-dir>
+//   reads  <resources-dir>/age_check.artifact and age_check.wasm (the demo's copies),
+//          age_check's verification_key.json, and a proof made by snarkjs
+//          (<fixtures>/age_check_snarkjs_{proof,public}.json)
 //   writes <out-dir>/{eligible,ineligible}.{proof,public}.json for snarkjs, through
 //          Proof.write, so the exported files are what an independent verifier checks.
 
@@ -31,6 +33,18 @@ func expectError(_ name: String, _ body: () async throws -> Void, _ matches: (La
         check(matches(error), "\(name): \(error.debugDescription)")
     } catch {
         check(false, "\(name): not a LaniakeaError: \(error)")
+    }
+}
+
+@MainActor
+func expectVerificationError(_ name: String, _ body: () async throws -> Void, _ matches: (VerificationError) -> Bool) async {
+    do {
+        try await body()
+        check(false, "\(name): expected an error, got success")
+    } catch let error as VerificationError {
+        check(matches(error), "\(name): \(error.debugDescription)")
+    } catch {
+        check(false, "\(name): not a VerificationError: \(error)")
     }
 }
 
@@ -91,13 +105,15 @@ func proofObject(_ json: String) -> [String: Any]? {
 struct SDKTests {
     static func main() async throws {
         let args = CommandLine.arguments
-        guard args.count == 4 else {
-            print("usage: SDKTests <resources-dir> <out-dir> <other-circuit.wasm>")
+        guard args.count == 6 else {
+            print("usage: SDKTests <resources-dir> <out-dir> <other-circuit.wasm> <verification_key.json> <snarkjs-fixtures-dir>")
             exit(64)
         }
         let resources = URL(fileURLWithPath: args[1])
         let out = URL(fileURLWithPath: args[2])
         let otherWasm = try Data(contentsOf: URL(fileURLWithPath: args[3]))
+        let verificationKey = URL(fileURLWithPath: args[4])
+        let fixtures = URL(fileURLWithPath: args[5])
         let artifactURL = resources.appendingPathComponent("age_check.artifact")
         let wasmURL = resources.appendingPathComponent("age_check.wasm")
 
@@ -107,6 +123,7 @@ struct SDKTests {
         let prover = try await Prover(circuit: circuit)
         try await proofTests(prover, out)
         await proofErrorTests(prover)
+        try await verifierTests(prover, verificationKey, fixtures)
         await badCircuitTests(circuit, otherWasm: otherWasm)
         await concurrencyTests(circuit, prover)
         await mainThreadTests(circuit, prover)
@@ -227,6 +244,75 @@ struct SDKTests {
             return false
         }
         return circuit
+    }
+
+    // MARK: verifying
+
+    static func verifierTests(_ prover: Prover, _ keyURL: URL, _ fixtures: URL) async throws {
+        print("verifying")
+        // VerifierError -> LaniakeaError, every case.
+        let verifierMappings: [(VerifierError, VerificationError)] = [
+            (.InvalidVerificationKey(detail: "k"), .invalidVerificationKey(detail: "k")),
+            (.InvalidProof(detail: "p"), .invalidProof(detail: "p")),
+            (.InvalidPublicSignals(detail: "s"), .invalidPublicSignals(detail: "s")),
+            (.Internal(detail: "i"), .internalFailure(detail: "i")),
+        ]
+        for (source, expected) in verifierMappings {
+            check(VerificationError(wrapping: source) == expected, "\(source) -> \(expected.debugDescription)")
+        }
+        let verificationErrors: [VerificationError] = verifierMappings.map(\.1) + [.keyUnreadable(file: "k.json", reason: "gone")]
+        for error in verificationErrors {
+            let text = error.errorDescription ?? ""
+            check(!text.isEmpty && text.hasSuffix(".") && error.localizedDescription == text, "message: \(text)")
+        }
+        check(Set(verificationErrors.map(\.debugDescription)).count == verificationErrors.count, "every VerificationError has its own debugDescription")
+
+        let verifier = try Verifier(verificationKeyAt: keyURL)
+        check(verifier.publicSignalCount == 2, "Verifier.publicSignalCount == 2")
+        let keyText = try String(contentsOf: keyURL, encoding: .utf8)
+        let fromText = try Verifier(verificationKeyJSON: keyText)
+
+        let eligible = try await prover.prove(["age": .integer(25), "threshold": .integer(18)])
+        let ineligible = try await prover.prove(["age": .integer(10), "threshold": .integer(18)])
+        check(try await verifier.verify(eligible), "a fresh proof (out = 1) verifies")
+        check(try await verifier.verify(ineligible), "a fresh proof with out = 0 also verifies: validity is not the condition")
+        check(try await fromText.verify(eligible), "Verifier(verificationKeyJSON:) verifies the same proof")
+        check(try await !verifier.verify(proofJSON: eligible.proofJSON, publicSignals: ["0", "18"]), "changed public signals -> false")
+        check(try await !verifier.verify(proofJSON: ineligible.proofJSON, publicSignals: eligible.publicSignals), "a proof with another proof's signals -> false")
+
+        let snarkjsProof = try String(contentsOf: fixtures.appendingPathComponent("age_check_snarkjs_proof.json"), encoding: .utf8)
+        let snarkjsSignals = try JSONDecoder().decode([String].self, from: Data(contentsOf: fixtures.appendingPathComponent("age_check_snarkjs_public.json")))
+        check(try await verifier.verify(proofJSON: snarkjsProof, publicSignals: snarkjsSignals), "a proof made by snarkjs verifies")
+
+        await expectVerificationError("a proof that is not JSON", { _ = try await verifier.verify(proofJSON: "nope", publicSignals: ["1", "18"]) }) {
+            if case .invalidProof = $0 { return true }
+            return false
+        }
+        await expectVerificationError("too few public signals", { _ = try await verifier.verify(proofJSON: eligible.proofJSON, publicSignals: ["1"]) }) {
+            if case .invalidPublicSignals = $0 { return true }
+            return false
+        }
+        await expectVerificationError("a public signal equal to the field modulus", {
+            _ = try await verifier.verify(proofJSON: eligible.proofJSON, publicSignals: ["1", fieldModulus])
+        }) {
+            if case .invalidPublicSignals = $0 { return true }
+            return false
+        }
+        await expectVerificationError("a key that is not JSON", { _ = try Verifier(verificationKeyJSON: "{") }) {
+            if case .invalidVerificationKey = $0 { return true }
+            return false
+        }
+        await expectVerificationError("a key for another protocol", {
+            _ = try Verifier(verificationKeyJSON: keyText.replacingOccurrences(of: "\"groth16\"", with: "\"plonk\""))
+        }) {
+            if case .invalidVerificationKey = $0 { return true }
+            return false
+        }
+        let missing = keyURL.deletingLastPathComponent().appendingPathComponent("missing_key.json")
+        await expectVerificationError("a missing key file", { _ = try Verifier(verificationKeyAt: missing) }) {
+            if case .keyUnreadable(let file, _) = $0 { return file == missing.path }
+            return false
+        }
     }
 
     // MARK: proving and the proof

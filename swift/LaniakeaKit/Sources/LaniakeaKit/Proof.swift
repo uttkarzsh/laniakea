@@ -3,10 +3,11 @@ import Foundation
 /// A generated Groth16 proof and the public signals it was generated for, in the
 /// layouts snarkjs reads (`proof.json` and `public.json`).
 ///
-/// **Generated is not verified, and valid is not "true".** Laniakea only proves. To
-/// check a proof, give `proof.json`, `public.json` and the circuit's verification key
-/// to a verifier (`snarkjs groth16 verify verification_key.json public.json proof.json`,
-/// or one on a server). And a valid proof only says the circuit was satisfied with
+/// **Generated is not verified, and valid is not "true".** `prove` does not check the
+/// proof. To check one, use `Verifier` with the circuit's verification key, or give
+/// `proof.json`, `public.json` and the key to another verifier
+/// (`snarkjs groth16 verify verification_key.json public.json proof.json`, or one on a
+/// server). And a valid proof only says the circuit was satisfied with
 /// these public signals: a circuit like `age_check` can produce a valid proof whose
 /// output signal is 0. Whoever relies on the proof must read the public signals.
 public struct Proof: Sendable, Equatable {

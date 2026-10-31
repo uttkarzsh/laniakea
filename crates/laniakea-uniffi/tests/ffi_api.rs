@@ -246,3 +246,42 @@ fn one_prover_serves_concurrent_calls() {
         }
     });
 }
+
+// ------------------------------------------------------------------ LaniakeaVerifier
+
+fn verifier() -> Arc<laniakea_uniffi::LaniakeaVerifier> {
+    let json = fs::read_to_string(format!("{CIRCUITS}/age_check/verification_key.json")).unwrap();
+    laniakea_uniffi::LaniakeaVerifier::new(json).expect("build verifier")
+}
+
+#[test]
+fn verifier_is_send_and_sync() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<laniakea_uniffi::LaniakeaVerifier>();
+}
+
+#[test]
+fn verifier_accepts_valid_proofs_and_rejects_altered_signals() {
+    use laniakea_uniffi::VerifierError;
+    let v = verifier();
+    assert_eq!(v.num_public_signals(), 2);
+    let r = prover().prove(age("25", "18")).expect("prove");
+    assert!(v
+        .verify(r.proof_json.clone(), r.public_signals.clone())
+        .unwrap());
+    assert!(!v
+        .verify(r.proof_json.clone(), vec!["0".into(), "18".into()])
+        .unwrap());
+    assert!(matches!(
+        v.verify(r.proof_json.clone(), vec!["1".into()]),
+        Err(VerifierError::InvalidPublicSignals { .. })
+    ));
+    assert!(matches!(
+        v.verify("{}".into(), r.public_signals.clone()),
+        Err(VerifierError::InvalidProof { .. })
+    ));
+    assert!(matches!(
+        laniakea_uniffi::LaniakeaVerifier::new("{}".into()),
+        Err(VerifierError::InvalidVerificationKey { .. })
+    ));
+}

@@ -1,4 +1,5 @@
-//! Swift-facing wrapper around `laniakea-core`'s [`laniakea_core::Prover`].
+//! Swift-facing wrapper around `laniakea-core`'s [`laniakea_core::Prover`] and
+//! [`laniakea_core::Verifier`].
 //!
 //! The core knows nothing about UniFFI; this crate owns the FFI vocabulary:
 //! decimal-string inputs, a flat error enum, and plain records.
@@ -8,7 +9,7 @@ mod inputs;
 
 use std::sync::Arc;
 
-pub use error::ProverError;
+pub use error::{ProverError, VerifierError};
 
 uniffi::setup_scaffolding!("laniakea");
 
@@ -78,6 +79,42 @@ impl LaniakeaProver {
     }
 
     /// Number of public signals a proof carries.
+    pub fn num_public_signals(&self) -> u32 {
+        u32::try_from(self.inner.num_public_signals()).unwrap_or(u32::MAX)
+    }
+}
+
+/// Verifies Groth16 proofs against one snarkjs `verification_key.json`.
+///
+/// Built once from the key, then usable for any number of
+/// [`LaniakeaVerifier::verify`] calls, from any thread. `verify` is CPU-bound
+/// (a few pairings) and blocks.
+#[derive(uniffi::Object)]
+pub struct LaniakeaVerifier {
+    inner: laniakea_core::Verifier,
+}
+
+#[uniffi::export]
+impl LaniakeaVerifier {
+    /// Parses and validates the key (protocol, curve, nPublic, every point).
+    #[uniffi::constructor]
+    pub fn new(verification_key_json: String) -> Result<Arc<Self>, VerifierError> {
+        let inner = laniakea_core::Verifier::from_snarkjs_json(&verification_key_json)?;
+        Ok(Arc::new(Self { inner }))
+    }
+
+    /// `true`: valid for these public signals under this key. `false`: well formed
+    /// but invalid. An error: the proof or the signals could not be checked at all
+    /// (a caller deciding whether to trust a proof treats it like `false`).
+    pub fn verify(
+        &self,
+        proof_json: String,
+        public_signals: Vec<String>,
+    ) -> Result<bool, VerifierError> {
+        Ok(self.inner.verify(&proof_json, &public_signals)?)
+    }
+
+    /// Number of public signals a proof for this key carries.
     pub fn num_public_signals(&self) -> u32 {
         u32::try_from(self.inner.num_public_signals()).unwrap_or(u32::MAX)
     }

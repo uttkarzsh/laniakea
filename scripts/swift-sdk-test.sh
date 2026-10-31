@@ -6,7 +6,7 @@
 #   scripts/swift-sdk-test.sh                    # snarkjs missing -> verification SKIPPED, exit 0
 #   REQUIRE_SNARKJS=1 scripts/swift-sdk-test.sh  # strict (CI): a missing snarkjs is an error
 #
-# Steps:
+# Steps (the tests include Verifier against verification_key.json and a proof made by snarkjs):
 #   1. builds the generated bindings as module `_LaniakeaBindings` and the Swift layer as module
 #      `LaniakeaKit` (Swift 5 mode, as the package's manifest says; the layer with
 #      testing enabled so the tests can reach its internal mapping code);
@@ -78,7 +78,8 @@ swiftc -swift-version 5 -strict-concurrency=complete -warnings-as-errors -parse-
   -o "$WORK/SDKTests"
 
 echo "==> running"
-"$WORK/SDKTests" "$RESOURCES" "$WORK/out" "$ROOT/circuits/witness_probe/witness_probe_js/witness_probe.wasm"
+"$WORK/SDKTests" "$RESOURCES" "$WORK/out" "$ROOT/circuits/witness_probe/witness_probe_js/witness_probe.wasm" \
+  "$CIRCUIT/verification_key.json" "$ROOT/crates/laniakea-core/tests/fixtures"
 
 echo "==> independent verification of the files written by Proof.write"
 if command -v snarkjs >/dev/null; then

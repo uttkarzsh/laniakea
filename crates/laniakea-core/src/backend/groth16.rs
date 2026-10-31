@@ -86,7 +86,7 @@ impl ZkBackend for Groth16Backend {
 
 /// Parse proof from JSON directly to ark_groth16::Proof (supports both snarkjs and internal formats).
 /// Every point is validated (on-curve, subgroup) before it can reach a pairing.
-fn proof_from_json(json_str: &str) -> Result<ark_groth16::Proof<Bn254>, LaniakeaError> {
+pub(crate) fn proof_from_json(json_str: &str) -> Result<ark_groth16::Proof<Bn254>, LaniakeaError> {
     let value: serde_json::Value =
         serde_json::from_str(json_str).map_err(|e| LaniakeaError::Serialization(e.to_string()))?;
 

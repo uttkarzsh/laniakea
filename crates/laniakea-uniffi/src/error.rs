@@ -7,7 +7,7 @@
 //! Field names avoid `message`, which collides with `Throwable.message` in
 //! Kotlin bindings should those ever be generated.
 
-use laniakea_core::{CircuitLoadError, LaniakeaError, WitnessError};
+use laniakea_core::{CircuitLoadError, LaniakeaError, VerificationError, WitnessError};
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum ProverError {
@@ -82,6 +82,44 @@ pub enum ProverError {
     /// A bug or a version mismatch, never the caller's input.
     #[error("internal error: {detail}")]
     Internal { detail: String },
+}
+
+/// What `LaniakeaVerifier` can throw. None of these is a proof that failed to
+/// verify (that is `false`); each says the input could not be checked at all.
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum VerifierError {
+    /// The verification key is not a usable snarkjs Groth16 BN254 key.
+    #[error("invalid verification key: {detail}")]
+    InvalidVerificationKey { detail: String },
+    /// The proof is not a well-formed Groth16 BN254 proof (bad JSON, a
+    /// non-canonical coordinate, a point off the curve or outside the subgroup).
+    #[error("invalid proof: {detail}")]
+    InvalidProof { detail: String },
+    /// Wrong number of public signals for the key, or a value that is not a
+    /// canonical decimal below the BN254 scalar field modulus.
+    #[error("invalid public signals: {detail}")]
+    InvalidPublicSignals { detail: String },
+    /// A verification error added to the core later and not yet mapped here.
+    #[error("internal error: {detail}")]
+    Internal { detail: String },
+}
+
+impl From<VerificationError> for VerifierError {
+    fn from(e: VerificationError) -> Self {
+        match e {
+            VerificationError::InvalidVerificationKey(detail) => {
+                VerifierError::InvalidVerificationKey { detail }
+            }
+            VerificationError::InvalidProof(detail) => VerifierError::InvalidProof { detail },
+            VerificationError::InvalidPublicSignals(detail) => {
+                VerifierError::InvalidPublicSignals { detail }
+            }
+            // `VerificationError` is #[non_exhaustive].
+            other => VerifierError::Internal {
+                detail: other.to_string(),
+            },
+        }
+    }
 }
 
 fn from_witness(e: WitnessError) -> ProverError {
@@ -277,6 +315,23 @@ mod tests {
                 other => panic!("expected Internal, got {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn verification_errors_map_one_to_one() {
+        let v = |e: VerificationError| -> VerifierError { e.into() };
+        assert!(matches!(
+            v(VerificationError::InvalidVerificationKey("k".into())),
+            VerifierError::InvalidVerificationKey { detail } if detail == "k"
+        ));
+        assert!(matches!(
+            v(VerificationError::InvalidProof("p".into())),
+            VerifierError::InvalidProof { detail } if detail == "p"
+        ));
+        assert!(matches!(
+            v(VerificationError::InvalidPublicSignals("s".into())),
+            VerifierError::InvalidPublicSignals { detail } if detail == "s"
+        ));
     }
 
     #[test]

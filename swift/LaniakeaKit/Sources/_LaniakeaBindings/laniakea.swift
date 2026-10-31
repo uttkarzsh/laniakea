@@ -447,6 +447,30 @@ fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterBool : FfiConverter {
+    typealias FfiType = Int8
+    typealias SwiftType = Bool
+
+    public static func lift(_ value: Int8) throws -> Bool {
+        return value != 0
+    }
+
+    public static func lower(_ value: Bool) -> Int8 {
+        return value ? 1 : 0
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Bool {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: Bool, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterString: FfiConverter {
     typealias SwiftType = String
     typealias FfiType = RustBuffer
@@ -670,6 +694,178 @@ public func FfiConverterTypeLaniakeaProver_lift(_ pointer: UnsafeMutableRawPoint
 #endif
 public func FfiConverterTypeLaniakeaProver_lower(_ value: LaniakeaProver) -> UnsafeMutableRawPointer {
     return FfiConverterTypeLaniakeaProver.lower(value)
+}
+
+
+
+
+/**
+ * Verifies Groth16 proofs against one snarkjs `verification_key.json`.
+ *
+ * Built once from the key, then usable for any number of
+ * [`LaniakeaVerifier::verify`] calls, from any thread. `verify` is CPU-bound
+ * (a few pairings) and blocks.
+ */
+public protocol LaniakeaVerifierProtocol : AnyObject {
+    
+    /**
+     * Number of public signals a proof for this key carries.
+     */
+    func numPublicSignals()  -> UInt32
+    
+    /**
+     * `true`: valid for these public signals under this key. `false`: well formed
+     * but invalid. An error: the proof or the signals could not be checked at all
+     * (a caller deciding whether to trust a proof treats it like `false`).
+     */
+    func verify(proofJson: String, publicSignals: [String]) throws  -> Bool
+    
+}
+
+/**
+ * Verifies Groth16 proofs against one snarkjs `verification_key.json`.
+ *
+ * Built once from the key, then usable for any number of
+ * [`LaniakeaVerifier::verify`] calls, from any thread. `verify` is CPU-bound
+ * (a few pairings) and blocks.
+ */
+open class LaniakeaVerifier:
+    LaniakeaVerifierProtocol {
+    fileprivate let pointer: UnsafeMutableRawPointer!
+
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoPointer {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
+        return try! rustCall { uniffi_laniakea_uniffi_fn_clone_laniakeaverifier(self.pointer, $0) }
+    }
+    /**
+     * Parses and validates the key (protocol, curve, nPublic, every point).
+     */
+public convenience init(verificationKeyJson: String)throws  {
+    let pointer =
+        try rustCallWithError(FfiConverterTypeVerifierError.lift) {
+    uniffi_laniakea_uniffi_fn_constructor_laniakeaverifier_new(
+        FfiConverterString.lower(verificationKeyJson),$0
+    )
+}
+    self.init(unsafeFromRawPointer: pointer)
+}
+
+    deinit {
+        guard let pointer = pointer else {
+            return
+        }
+
+        try! rustCall { uniffi_laniakea_uniffi_fn_free_laniakeaverifier(pointer, $0) }
+    }
+
+    
+
+    
+    /**
+     * Number of public signals a proof for this key carries.
+     */
+open func numPublicSignals() -> UInt32 {
+    return try!  FfiConverterUInt32.lift(try! rustCall() {
+    uniffi_laniakea_uniffi_fn_method_laniakeaverifier_num_public_signals(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * `true`: valid for these public signals under this key. `false`: well formed
+     * but invalid. An error: the proof or the signals could not be checked at all
+     * (a caller deciding whether to trust a proof treats it like `false`).
+     */
+open func verify(proofJson: String, publicSignals: [String])throws  -> Bool {
+    return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeVerifierError.lift) {
+    uniffi_laniakea_uniffi_fn_method_laniakeaverifier_verify(self.uniffiClonePointer(),
+        FfiConverterString.lower(proofJson),
+        FfiConverterSequenceString.lower(publicSignals),$0
+    )
+})
+}
+    
+
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLaniakeaVerifier: FfiConverter {
+
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = LaniakeaVerifier
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> LaniakeaVerifier {
+        return LaniakeaVerifier(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: LaniakeaVerifier) -> UnsafeMutableRawPointer {
+        return value.uniffiClonePointer()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LaniakeaVerifier {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: LaniakeaVerifier, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+}
+
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLaniakeaVerifier_lift(_ pointer: UnsafeMutableRawPointer) throws -> LaniakeaVerifier {
+    return try FfiConverterTypeLaniakeaVerifier.lift(pointer)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLaniakeaVerifier_lower(_ value: LaniakeaVerifier) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeLaniakeaVerifier.lower(value)
 }
 
 
@@ -1094,6 +1290,109 @@ extension ProverError: Foundation.LocalizedError {
     }
 }
 
+
+/**
+ * What `LaniakeaVerifier` can throw. None of these is a proof that failed to
+ * verify (that is `false`); each says the input could not be checked at all.
+ */
+public enum VerifierError {
+
+    
+    
+    /**
+     * The verification key is not a usable snarkjs Groth16 BN254 key.
+     */
+    case InvalidVerificationKey(detail: String
+    )
+    /**
+     * The proof is not a well-formed Groth16 BN254 proof (bad JSON, a
+     * non-canonical coordinate, a point off the curve or outside the subgroup).
+     */
+    case InvalidProof(detail: String
+    )
+    /**
+     * Wrong number of public signals for the key, or a value that is not a
+     * canonical decimal below the BN254 scalar field modulus.
+     */
+    case InvalidPublicSignals(detail: String
+    )
+    /**
+     * A verification error added to the core later and not yet mapped here.
+     */
+    case Internal(detail: String
+    )
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVerifierError: FfiConverterRustBuffer {
+    typealias SwiftType = VerifierError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VerifierError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .InvalidVerificationKey(
+            detail: try FfiConverterString.read(from: &buf)
+            )
+        case 2: return .InvalidProof(
+            detail: try FfiConverterString.read(from: &buf)
+            )
+        case 3: return .InvalidPublicSignals(
+            detail: try FfiConverterString.read(from: &buf)
+            )
+        case 4: return .Internal(
+            detail: try FfiConverterString.read(from: &buf)
+            )
+
+         default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: VerifierError, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        
+        case let .InvalidVerificationKey(detail):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(detail, into: &buf)
+            
+        
+        case let .InvalidProof(detail):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(detail, into: &buf)
+            
+        
+        case let .InvalidPublicSignals(detail):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(detail, into: &buf)
+            
+        
+        case let .Internal(detail):
+            writeInt(&buf, Int32(4))
+            FfiConverterString.write(detail, into: &buf)
+            
+        }
+    }
+}
+
+
+extension VerifierError: Equatable, Hashable {}
+
+extension VerifierError: Foundation.LocalizedError {
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+}
+
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
@@ -1165,7 +1464,16 @@ private var initializationResult: InitializationResult = {
     if (uniffi_laniakea_uniffi_checksum_method_laniakeaprover_prove() != 18994) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_laniakea_uniffi_checksum_method_laniakeaverifier_num_public_signals() != 657) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_laniakea_uniffi_checksum_method_laniakeaverifier_verify() != 50656) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_laniakea_uniffi_checksum_constructor_laniakeaprover_new() != 49459) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_laniakea_uniffi_checksum_constructor_laniakeaverifier_new() != 4012) {
         return InitializationResult.apiChecksumMismatch
     }
 

@@ -131,11 +131,27 @@ Everything thrown is a `LaniakeaError` (a `LocalizedError`; `debugDescription` h
 
 ## 5. Verifying
 
-The SDK generates proofs; it does not verify them. Verify with any Groth16 verifier and your
-circuit's `verification_key.json`, for example
-`snarkjs groth16 verify verification_key.json public.json proof.json`. A valid proof says the circuit
-accepted some private inputs; it does not say your application's condition holds. **Read the public
-signals**: for the `age_check` example, a valid proof exists when `out` is `0`, too.
+`prove` does not check its result. To verify, give the circuit's snarkjs `verification_key.json`
+(`snarkjs zkey export verificationkey`) to `Verifier`, on the device, or to any Groth16 verifier
+(`snarkjs groth16 verify verification_key.json public.json proof.json`):
+
+```swift
+let verifier = try Verifier(verificationKeyAt: keyURL)   // once; validates the key
+let valid = try await verifier.verify(proof)             // a Proof from prove
+let other = try await verifier.verify(proofJSON: json, publicSignals: signals)   // received from elsewhere
+```
+
+- `true`: valid for these public signals under this key. `false`: well formed but invalid (altered,
+  forged, other signals, another key). A thrown `VerificationError` (`.invalidProof`,
+  `.invalidPublicSignals`, `.invalidVerificationKey`, `.keyUnreadable`): could not be checked. Only
+  `true` accepts.
+- **The key must be yours**: bundled with, or pinned by, the verifying app. A key that arrives together
+  with the proof proves nothing. Verifying on the device that made the proof only checks the prover; it
+  convinces no one else.
+
+A valid proof says the circuit accepted some private inputs; it does not say your application's
+condition holds. **Read the public signals**: for the `age_check` example, a valid proof exists when
+`out` is `0`, too.
 
 ## 6. Your circuit, and what a proof means
 
@@ -181,5 +197,5 @@ real HTTPS release (nothing is published); Xcode 16.x; iOS below 27.
 
 Known limits: the libraries are about 27 MB per architecture slice before the linker strips them
 (app-size impact unmeasured); the library exports many Rust symbols, so linking it next to another Rust
-static library in the same app may collide; making the `.artifact` needs the Rust tool; there is no
-on-device verifier; the Intel simulator is not supported; the package is unaudited.
+static library in the same app may collide; making the `.artifact` needs the Rust tool; the
+Intel simulator is not supported; the package is unaudited.

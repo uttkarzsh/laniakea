@@ -13,7 +13,8 @@ Swift as the package `LaniakeaKit`.
 ## Features
 
 - Circom circuits, Groth16 over BN254; proofs verify with snarkjs.
-- Small Swift API: `Circuit`, `Prover` (an actor), `Proof`, `Input`, `LaniakeaError`.
+- Small Swift API: `Circuit`, `Prover` (an actor), `Proof`, `Input`, `LaniakeaError`, and `Verifier` (an actor) for
+  on-device verification against a snarkjs `verification_key.json`.
 - Distributed as a Swift package with a prebuilt XCFramework: no Rust, Cargo or UniFFI on the app side.
 - Versioned `.artifact` proving-key format (`docs/ARTIFACT_FORMAT.md`).
 - Circuit-independent: your app bundles its own `<name>.artifact` and `<name>.wasm`.
@@ -47,8 +48,13 @@ proof.proofJSON         // snarkjs proof.json
 try proof.write(to: directory)   // proof.json + public.json, for an independent verifier
 ```
 
-The SDK generates proofs; verify them with any Groth16 verifier, e.g.
-`snarkjs groth16 verify verification_key.json public.json proof.json`.
+Verify on the device with the circuit's snarkjs verification key, or with any Groth16 verifier
+(`snarkjs groth16 verify verification_key.json public.json proof.json`):
+
+```swift
+let verifier = try Verifier(verificationKeyAt: keyURL)   // a key you chose, not one sent with the proof
+let valid = try await verifier.verify(proof)              // true, false, or throws VerificationError
+```
 
 **Full guide** (installation details, circuit files, errors, verification, limitations, the example circuit's
 caveats): [`docs/INTEGRATION.md`](docs/INTEGRATION.md). A complete SwiftUI app doing this:
