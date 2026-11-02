@@ -21,7 +21,12 @@ struct ContentView: View {
                         if let measurements = model.measurements {
                             Text(measurements).font(.footnote).monospacedDigit()
                         }
-                        Text("Two separate questions. Is the proof valid? Not checked here: this app only generates it; a verifier must check it. Is the person eligible? Only the public signal out says so (1 = yes), and a valid proof also exists when out = 0.")
+                        Button("Verify on this device") { Task { await model.verify() } }
+                            .disabled(!model.canVerify)
+                        if let verification = model.verification {
+                            Text(verification).font(.footnote).textSelection(.enabled)
+                        }
+                        Text("Two separate questions. Is the proof valid? The button checks it here, against the verification key bundled with this app; that only checks this device's prover, so anyone relying on the proof must verify it themselves, with a key they trust. Is the person eligible? Only the public signal out says so (1 = yes), and a valid proof also exists when out = 0.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                         Button("Export proof.json and public.json") { model.export() }

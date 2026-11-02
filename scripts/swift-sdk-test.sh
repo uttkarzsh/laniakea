@@ -13,11 +13,11 @@
 #   2. type-checks the layer, warnings as errors, in the language modes an app may use:
 #      Swift 5 with complete concurrency checking, and Swift 6;
 #   3. builds and runs swift/LaniakeaKit/Tests-macOS/SDKTests.swift against the host
-#      library, with the demo's age_check artifact and WASM (and an unrelated circuit's
+#      library, with the example age_check artifact and WASM (and an unrelated circuit's
 #      WASM, to test an artifact paired with the wrong circuit);
 #   4. verifies the proofs exported by Proof.write with snarkjs.
 #
-# Host execution only: the iOS slices are exercised by scripts/run-ios-sim-app.sh.
+# Host execution only: the iOS slices are exercised by scripts/release/validate-consumer.sh.
 # Output goes under Cargo's target directory.
 set -euo pipefail
 
@@ -33,17 +33,19 @@ BIND="$TARGET/uniffi/swift"
 LIBDIR="$TARGET/debug"
 WORK="$TARGET/uniffi/sdk-test"
 KIT="$ROOT/swift/LaniakeaKit"
-RESOURCES="$ROOT/examples/ios-age-app/AgeCheckApp/Resources"
 CIRCUIT="$ROOT/circuits/age_check"
+# The tests read a directory holding age_check.artifact and age_check.wasm, like an app bundle.
+RESOURCES="$WORK/resources"
 
-echo "==> checking the bundled resources"
-"$ROOT/scripts/prepare-ios-app-resources.sh" --check
+echo "==> checking the example artifact"
+"$ROOT/scripts/prepare-example-artifact.sh" --check
 
 "$ROOT/scripts/gen-swift-bindings.sh"
 [ -f "$LIBDIR/liblaniakea_uniffi.dylib" ] || die "host library missing in $LIBDIR"
 
 rm -rf "$WORK"
-mkdir -p "$WORK/mod" "$WORK/out"
+mkdir -p "$WORK/mod" "$WORK/out" "$RESOURCES"
+cp "$CIRCUIT/age_check.artifact" "$CIRCUIT/age_check_js/age_check.wasm" "$RESOURCES/"
 
 SOURCES=("$KIT"/Sources/LaniakeaKit/*.swift)
 [ -f "${SOURCES[0]}" ] || die "no Swift sources in $KIT/Sources/LaniakeaKit"

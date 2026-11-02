@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the consumer app for a connected iPhone, runs it for an eligible and an ineligible age,
-# copies back the exported proofs and the app's log (which has the proving time and memory), and
-# verifies both proofs with snarkjs. NOT YET RUN: written while no iPhone was reachable, so treat
+# copies back the exported proofs and the app's log (which has the proving time, memory and the
+# result of LaniakeaKit's on-device Verifier), and verifies both proofs with snarkjs. NOT YET RUN: written while no iPhone was reachable, so treat
 # its first run as a test of the script as well.
 #
 #   DEVELOPMENT_TEAM=<your team id> examples/ios-consumer/run-on-device.sh <device name or UDID>
@@ -49,6 +49,11 @@ for age in 25 10; do
       --source "Documents/$f" --destination "$WORK/out/$age/$f" >/dev/null
   done
   head -1 "$WORK/out/$age/consumer.log"
+  # On-device Verifier (when prepare.sh bundled a verification key): must accept, and reject the altered copy.
+  grep '^verify:' "$WORK/out/$age/consumer.log" || true
+  if grep -q '^verify: valid=' "$WORK/out/$age/consumer.log" && ! grep -q '^verify: valid=true altered=false' "$WORK/out/$age/consumer.log"; then
+    echo "error: on-device verification failed for age $age" >&2; exit 1
+  fi
   ( cd "$WORK/out/$age" && "${SNARKJS[@]}" groth16 verify "$VKEY" public.json proof.json 2>&1 | sed 's/\x1b\[[0-9;]*m//g' )
 done
 

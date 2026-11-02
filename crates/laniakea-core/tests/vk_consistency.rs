@@ -2,8 +2,9 @@
 //!
 //! Three things carry (or are derived from) the Groth16 verifying key:
 //!   * `age_check_final.zkey`: the source of truth; its parse embeds `proving_key.vk`;
-//!   * `examples/ios-age-app/AgeCheckApp/Resources/age_check.artifact`: the file the
-//!     app bundles, a serialized `ProvingArtifact` that also embeds `proving_key.vk`;
+//!   * `circuits/age_check/age_check.artifact`: the committed artifact that tests, the
+//!     release check and the example app bundle, a serialized `ProvingArtifact` that also
+//!     embeds `proving_key.vk`;
 //!   * `circuits/age_check/verification_key.json`: the snarkjs-format key that
 //!     verifiers (snarkjs, `Groth16Backend::verify`) are given.
 //!
@@ -26,7 +27,7 @@ use std::fs;
 
 const ZKEY: &str = "../../circuits/age_check/age_check_final.zkey";
 const VK_JSON: &str = "../../circuits/age_check/verification_key.json";
-const BUNDLED: &str = "../../examples/ios-age-app/AgeCheckApp/Resources/age_check.artifact";
+const BUNDLED: &str = "../../circuits/age_check/age_check.artifact";
 
 fn read(path: &str) -> Vec<u8> {
     fs::read(path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"))
@@ -112,7 +113,7 @@ fn the_bundled_artifact_is_the_one_derived_from_the_zkey() {
     assert!(
         bundled == fresh,
         "the bundled age_check.artifact differs from the artifact derived from \
-         age_check_final.zkey (stale? rerun scripts/prepare-ios-app-resources.sh)"
+         age_check_final.zkey (stale? rerun scripts/prepare-example-artifact.sh)"
     );
     // And the exact bytes. Equal values can still have different encodings (the
     // decoder ignores the coordinates of a point at infinity), so a value comparison
@@ -120,7 +121,7 @@ fn the_bundled_artifact_is_the_one_derived_from_the_zkey() {
     assert!(
         bytes == fresh.to_bytes(),
         "the bundled age_check.artifact decodes to the right artifact but is not its \
-         canonical encoding (rerun scripts/prepare-ios-app-resources.sh)"
+         canonical encoding (rerun scripts/prepare-example-artifact.sh)"
     );
 }
 

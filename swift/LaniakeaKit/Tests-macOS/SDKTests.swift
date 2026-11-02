@@ -5,7 +5,7 @@
 // used; failures are counted and reported through the exit code.
 //
 // Usage: SDKTests <resources-dir> <out-dir> <other-circuit.wasm> <verification_key.json> <snarkjs-fixtures-dir>
-//   reads  <resources-dir>/age_check.artifact and age_check.wasm (the demo's copies),
+//   reads  <resources-dir>/age_check.artifact and age_check.wasm (copies of circuits/age_check's),
 //          age_check's verification_key.json, and a proof made by snarkjs
 //          (<fixtures>/age_check_snarkjs_{proof,public}.json)
 //   writes <out-dir>/{eligible,ineligible}.{proof,public}.json for snarkjs, through
@@ -637,7 +637,7 @@ struct SDKTests {
 
     // MARK: the main thread stays free
 
-    /// The probe used by the demo: a main-actor job is queued just before the `await`.
+    /// The probe: a main-actor job is queued just before the `await`.
     /// It can run before the call returns only if the call gave up the main actor, i.e.
     /// the CPU-bound work ran elsewhere. The outcome does not depend on how long it takes.
     @MainActor

@@ -6,30 +6,31 @@ never leave the device. The Rust prover uses the Wasmi interpreter (no JIT, no W
 Swift as the package `LaniakeaKit`.
 
 > **Status: early and unaudited.** Releases are published on the
-> [GitHub releases page](https://github.com/uttkarzsh/laniakea/releases), starting with the pre-release
-> `0.1.0-rc.1`. Testing so far is on the iOS Simulator; physical-device results are tracked in
-> `docs/INTEGRATION.md`. The only circuit here, `age_check`, is a development example, not production material.
+> [GitHub releases page](https://github.com/uttkarzsh/laniakea/releases); the current one is the pre-release
+> `0.1.0-rc.2`, the first with on-device verification (`Verifier`). Tested on iOS 27 simulators; proving also on
+> one physical iPhone 16 (details in `docs/INTEGRATION.md`). The only circuit here, `age_check`, is a development
+> example, not production material.
 
 ## Features
 
 - Circom circuits, Groth16 over BN254; proofs verify with snarkjs.
 - Small Swift API: `Circuit`, `Prover` (an actor), `Proof`, `Input`, `LaniakeaError`, and `Verifier` (an actor) for
-  on-device verification against a snarkjs `verification_key.json`.
+  on-device verification against a snarkjs `verification_key.json` (since `0.1.0-rc.2`).
 - Distributed as a Swift package with a prebuilt XCFramework: no Rust, Cargo or UniFFI on the app side.
 - Versioned `.artifact` proving-key format (`docs/ARTIFACT_FORMAT.md`).
 - Circuit-independent: your app bundles its own `<name>.artifact` and `<name>.wasm`.
 
-**Platforms:** iOS 15.0 or later (declared; tested only on iOS 27.x simulators), `arm64` device and `arm64`
-simulator. Needs Xcode 16.0 or later (Swift tools 6.0; tested only with Xcode 27.1). No Intel simulator.
+**Platforms:** iOS 15.0 or later (declared; tested only on iOS 27.x simulators and one iPhone 16 on iOS 26.6.2),
+`arm64` device and `arm64` simulator. Needs Xcode 16.0 or later (Swift tools 6.0; tested only with Xcode 27.1). No Intel simulator.
 
 ## Install
 
 Xcode: *File ▸ Add Package Dependencies…* with `https://github.com/uttkarzsh/laniakea.git`, then add the
-**LaniakeaKit** product. Pick a version from the releases page: pre-releases (such as `0.1.0-rc.1`) need an
+**LaniakeaKit** product. Pick a version from the releases page: pre-releases (such as `0.1.0-rc.2`) need an
 exact version; stable releases can use *Up to Next Major*. In `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/uttkarzsh/laniakea.git", exact: "0.1.0-rc.1")   // or from: "0.1.0"
+.package(url: "https://github.com/uttkarzsh/laniakea.git", exact: "0.1.0-rc.2")   // or from: "0.1.0"
 ```
 
 ## Use
@@ -48,8 +49,8 @@ proof.proofJSON         // snarkjs proof.json
 try proof.write(to: directory)   // proof.json + public.json, for an independent verifier
 ```
 
-Verify on the device with the circuit's snarkjs verification key, or with any Groth16 verifier
-(`snarkjs groth16 verify verification_key.json public.json proof.json`):
+Verify on the device with the circuit's snarkjs verification key (`Verifier`, since `0.1.0-rc.2`), or with any
+Groth16 verifier (`snarkjs groth16 verify verification_key.json public.json proof.json`):
 
 ```swift
 let verifier = try Verifier(verificationKeyAt: keyURL)   // a key you chose, not one sent with the proof
@@ -58,7 +59,7 @@ let valid = try await verifier.verify(proof)              // true, false, or thr
 
 **Full guide** (installation details, circuit files, errors, verification, limitations, the example circuit's
 caveats): [`docs/INTEGRATION.md`](docs/INTEGRATION.md). A complete SwiftUI app doing this:
-[`examples/ios-consumer`](examples/ios-consumer) (and a larger demo in `examples/ios-age-app`).
+[`examples/ios-consumer`](examples/ios-consumer).
 
 ## How it works
 
@@ -81,7 +82,7 @@ vendor/ark-circom  modified copy of ark-circom (desktop only)
 swift/LaniakeaKit  Swift API (Sources/LaniakeaKit), committed generated bindings, tests
 Package.swift      the Swift package (LaniakeaKit over a binary XCFramework of the Rust libraries)
 circuits/          age_check development example; witness_probe and reference data for tests
-examples/          ios-consumer (remote-package reference app), ios-age-app (demo)
+examples/          ios-consumer (the example app; depends on the package by URL and version)
 scripts/           build, test and release scripts
 docs/              INTEGRATION.md, ARTIFACT_FORMAT.md, third-party-upstream/ (licence texts)
 ```
@@ -95,12 +96,10 @@ cargo fmt --all --check
 cargo test --locked --offline --workspace --exclude ark-circom
 scripts/package-xcframework.sh          # builds Binaries/LaniakeaRustLib.xcframework (git-ignored) and checks the bindings
 scripts/check-bindings.sh               # committed generated Swift/C == a fresh generation
-scripts/prepare-ios-app-resources.sh --check
+scripts/prepare-example-artifact.sh --check   # circuits/age_check/age_check.artifact == a fresh export
 REQUIRE_SNARKJS=1 scripts/check-vk-consistency.sh
 REQUIRE_SNARKJS=1 scripts/check-circuit-behavior.sh
 REQUIRE_SNARKJS=1 scripts/swift-sdk-test.sh
-REQUIRE_SNARKJS=1 scripts/swift-app-logic-test.sh
-scripts/run-ios-sim-app.sh              # demo app on a booted simulator
 ```
 
 On development branches the package's binary target is the local `Binaries/` directory, so work on the SDK and
@@ -108,7 +107,11 @@ the example against a checkout with `examples/ios-consumer/package-source.sh loc
 Re-run `package-xcframework.sh` after changing Rust code. After editing `Cargo.lock`, regenerate the notices with
 `scripts/release/third-party-notices.py --write`.
 
-## Releasing (manual; nothing has been published)
+## Releasing (manual)
+
+Pre-releases so far were made this way, each tag on a release commit on its own branch `release/<V>`, with the
+asset on the GitHub release and checked with `validate-consumer.sh --remote`: `0.1.0-rc.1` (release commit
+`ddb747e`), then `0.1.0-rc.2` (adds `Verifier`).
 
 `Package.swift` has two forms that differ in one line, the `LaniakeaRustLib` binary target: a local path on
 every development commit, and a `url:` plus `checksum:` only in the release commit a version tag points at

@@ -86,7 +86,8 @@ development machine):
 cargo run -p laniakea-cli --bin export_artifact -- <circuit>_final.zkey <circuit>.artifact
 ```
 
-The repository's example artifact is regenerated with `scripts/prepare-ios-app-resources.sh`.
+The repository's example artifact (`circuits/age_check/age_check.artifact`) is regenerated with
+`scripts/prepare-example-artifact.sh`.
 Its payload is byte-identical to the old file; only the 18-byte header is new.
 
 ## Versioning policy

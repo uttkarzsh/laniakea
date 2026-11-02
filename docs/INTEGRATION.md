@@ -4,13 +4,14 @@ Laniakea generates Groth16 (BN254) proofs for Circom circuits on the device. You
 package, bundle two files for your circuit, and call `Prover`. Your app never builds or touches
 Rust.
 
-Versions are published as [GitHub releases](https://github.com/uttkarzsh/laniakea/releases); the first is
-the pre-release `0.1.0-rc.1`. See *Tested and not tested* for what has been run where.
+Versions are published as [GitHub releases](https://github.com/uttkarzsh/laniakea/releases): the
+pre-releases `0.1.0-rc.1` and `0.1.0-rc.2` (which adds `Verifier`). Use the newest. See *Tested and not
+tested* for what has been run where.
 
 ## 1. Add the package
 
 Xcode: *File ▸ Add Package Dependencies…*, enter `https://github.com/uttkarzsh/laniakea.git`, choose a
-version (for a pre-release such as `0.1.0-rc.1`, the rule *Exact Version*; for stable releases, *Up to Next
+version (for a pre-release such as `0.1.0-rc.2`, the rule *Exact Version*; for stable releases, *Up to Next
 Major Version*), and add the **LaniakeaKit** product to your app target.
 
 If your app keeps its code in a local Swift package (a common layout for SwiftUI apps), declare the
@@ -25,7 +26,7 @@ let package = Package(
     platforms: [.iOS(.v16)],                       // LaniakeaKit needs iOS 15.0 or later
     products: [.library(name: "AgeProof", targets: ["AgeProof"])],
     dependencies: [
-        .package(url: "https://github.com/uttkarzsh/laniakea.git", exact: "0.1.0-rc.1"),
+        .package(url: "https://github.com/uttkarzsh/laniakea.git", exact: "0.1.0-rc.2"),
         // stable releases: from: "0.1.0"
     ],
     targets: [
@@ -46,7 +47,7 @@ but only the library code is built.
 Depend on a **version** (`from:`, `exact:`), not on a branch or commit: only the commit a release tag
 points at names the downloadable libraries. On branches the manifest points at a local, git-ignored
 `Binaries/` directory, so a `branch:` or `revision:` dependency fails to resolve the `LaniakeaRustLib`
-binary target. Pre-release versions such as `0.1.0-rc.1` are only picked with `exact:`.
+binary target. Pre-release versions such as `0.1.0-rc.2` are only picked with `exact:`.
 
 Requirements: Xcode 16.0 or later (the manifest uses `swift-tools-version: 6.0`) and a deployment
 target of iOS 15.0 or later, as declared. Device and simulator slices are `arm64` only (no Intel
@@ -113,7 +114,8 @@ try proof.write(to: directory)   // proof.json + public.json
 - **Memory.** Everything is released when the `Prover` is. There is nothing to close.
 
 `examples/ios-consumer` is a complete SwiftUI app doing exactly this, including a progress state, an
-error message, and proving time and memory readout (`LaniakeaConsumer/ProofModel.swift`).
+error message, proving time and memory readout, and on-device verification with a bundled key
+(`LaniakeaConsumer/ProofModel.swift`).
 
 ## 4. Errors
 
@@ -133,7 +135,8 @@ Everything thrown is a `LaniakeaError` (a `LocalizedError`; `debugDescription` h
 
 `prove` does not check its result. To verify, give the circuit's snarkjs `verification_key.json`
 (`snarkjs zkey export verificationkey`) to `Verifier`, on the device, or to any Groth16 verifier
-(`snarkjs groth16 verify verification_key.json public.json proof.json`):
+(`snarkjs groth16 verify verification_key.json public.json proof.json`). `Verifier` is available from
+`0.1.0-rc.2`; with `0.1.0-rc.1`, verify off the device.
 
 ```swift
 let verifier = try Verifier(verificationKeyAt: keyURL)   // once; validates the key
@@ -163,14 +166,14 @@ by the prover proves nothing) and must read the public signals.
 
 ### The `age_check` example is a development example
 
-It lives in `circuits/age_check` and is used by the demo apps and tests. The public signals are
+It lives in `circuits/age_check` (with its committed `age_check.artifact`) and is used by the example app and tests. The public signals are
 `[out, threshold]`; `age` stays private.
 
 - It does **not** require `out == 1`: a valid proof with `out = 0` proves the condition is false, so a
   verifier must require `out == 1` and its expected threshold.
 - It does **not** range-check its inputs to 8 bits: with threshold 18 it also accepts ages 256–273
   (pinned by `crates/laniakea-core/tests/age_check_behavior.rs`). The SDK accepts any canonical decimal
-  below the field modulus; the demo apps restrict to 0–255, which only constrains the honest app.
+  below the field modulus; the example app restricts to 0–255, which only constrains the honest app.
 - The age is self-asserted, and a proof can be replayed by anyone holding it (no nonce, session or
   verifier input). The proof reveals the comparison result, though not the age.
 - Its trusted setup is a **development key**: one contribution named `laniakea dev`, added together with
@@ -192,8 +195,15 @@ a rehearsal where SwiftPM downloaded the XCFramework from a local HTTPS server a
 public signals; generic device and simulator builds. Simulator measurement: loading about 0.12 s, one
 proof about 0.02 s, about 20 MB memory footprint (not representative of an iPhone).
 
-Not tested: a physical iPhone (`examples/ios-consumer/run-on-device.sh` is written but has never run); a
-real HTTPS release (nothing is published); Xcode 16.x; iOS below 27.
+Also tested, against the published `0.1.0-rc.1`: resolving the package from GitHub by URL and exact version
+(`scripts/release/validate-consumer.sh --remote`: SwiftPM downloaded the release asset and checked its checksum,
+then the consumer proved on the simulator and snarkjs verified the proofs). And one physical device: an app
+outside this repository that depends on `0.1.0-rc.1` by URL, with its own SHA-256 circuit (one 512-bit block,
+31,330 constraints, 16 MB artifact), ran on an iPhone 16 (iOS 26.6.2, Debug build): loading about 7.3 s, one
+proof about 0.47 s; snarkjs on a Mac verified the proof copied from the phone. One run; memory was not measured.
+
+Not tested: the examples in this repository on a physical iPhone (`examples/ios-consumer/run-on-device.sh` has
+never run); `Verifier` on a physical iPhone (only on the simulator); Xcode 16.x; iOS below 26.
 
 Known limits: the libraries are about 27 MB per architecture slice before the linker strips them
 (app-size impact unmeasured); the library exports many Rust symbols, so linking it next to another Rust

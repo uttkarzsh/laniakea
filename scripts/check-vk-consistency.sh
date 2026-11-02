@@ -7,8 +7,8 @@
 #
 # Steps:
 #   1. cargo test -p laniakea-core --test vk_consistency: the key embedded in
-#      circuits/age_check/age_check_final.zkey, the key embedded in the bundled
-#      examples/ios-age-app/AgeCheckApp/Resources/age_check.artifact, and
+#      circuits/age_check/age_check_final.zkey, the key embedded in the committed
+#      circuits/age_check/age_check.artifact, and
 #      circuits/age_check/verification_key.json are the same key, and the JSON's
 #      vk_alphabeta_12 is the pairing of its alpha and beta;
 #   2. snarkjs derives a verification key from the same .zkey
@@ -32,11 +32,11 @@ command -v python3 >/dev/null || die "python3 not found"
 CIRCUIT="$ROOT/circuits/age_check"
 ZKEY="$CIRCUIT/age_check_final.zkey"
 VK="$CIRCUIT/verification_key.json"
-for f in "$ZKEY" "$VK" "$ROOT/examples/ios-age-app/AgeCheckApp/Resources/age_check.artifact"; do
+for f in "$ZKEY" "$VK" "$CIRCUIT/age_check.artifact"; do
   [ -s "$f" ] || die "missing or empty input: $f"
 done
 
-echo "==> Rust: zkey, bundled artifact and verification_key.json hold the same key"
+echo "==> Rust: zkey, committed artifact and verification_key.json hold the same key"
 cargo test -q -p laniakea-core --test vk_consistency || die "verifying-key consistency test failed"
 
 echo "==> snarkjs: key derived from the zkey vs the committed verification_key.json"

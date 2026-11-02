@@ -7,10 +7,10 @@
 # Requires a clean working tree on the commit to be released, Package.swift in its development
 # (local) form, full Xcode with an iOS simulator runtime, snarkjs and a booted simulator. Runs, in
 # order, logging each step to a temporary directory and continuing after a failure: formatting,
-# Rust tests, binding consistency, THIRD_PARTY_NOTICES.md freshness, artifact resource consistency,
-# verifying-key and circuit-behavior checks, Swift SDK and app-logic tests, build-asset.sh (which
-# also validates the ZIP), the offline consumer rehearsal, generic iOS Simulator and generic iOS
-# (signing off) builds, and the demo simulator run. Takes several minutes.
+# Rust tests, binding consistency, THIRD_PARTY_NOTICES.md freshness, the example artifact's
+# consistency, verifying-key and circuit-behavior checks, the Swift SDK tests, build-asset.sh (which
+# also validates the ZIP), the offline consumer rehearsal (which proves on the simulator), and
+# generic iOS Simulator and generic iOS (signing off) builds. Takes several minutes.
 #
 # It does not test the HTTPS download of the release asset (scripts/release/validate-consumer.sh
 # --remote, or --rehearse with ASSET_URL_BASE, README.md "Releasing"), other Xcode or iOS versions, or
@@ -61,11 +61,10 @@ step "cargo fmt --check" cargo fmt --all --check
 step "cargo test (workspace, without ark-circom)" cargo test --locked --offline --workspace --exclude ark-circom
 step "scripts/check-bindings.sh" scripts/check-bindings.sh
 step "THIRD_PARTY_NOTICES.md is current" scripts/release/third-party-notices.py --check
-step "scripts/prepare-ios-app-resources.sh --check" scripts/prepare-ios-app-resources.sh --check
+step "scripts/prepare-example-artifact.sh --check" scripts/prepare-example-artifact.sh --check
 step "scripts/check-vk-consistency.sh" env REQUIRE_SNARKJS=1 scripts/check-vk-consistency.sh
 step "scripts/check-circuit-behavior.sh" env REQUIRE_SNARKJS=1 scripts/check-circuit-behavior.sh
 step "scripts/swift-sdk-test.sh" env REQUIRE_SNARKJS=1 scripts/swift-sdk-test.sh
-step "scripts/swift-app-logic-test.sh" env REQUIRE_SNARKJS=1 scripts/swift-app-logic-test.sh
 
 # A LICENSE file is wanted in the asset but is the maintainer's to add (README.md "License"); the
 # asset is still built without one, with a warning from build-asset.sh.
@@ -80,7 +79,6 @@ fi
 DD="$LOGS/derived-data"
 step "xcodebuild Laniakea, generic iOS Simulator" xcodebuild -scheme Laniakea -destination 'generic/platform=iOS Simulator' -derivedDataPath "$DD/sim" build
 step "xcodebuild Laniakea, generic iOS, signing off" xcodebuild -scheme Laniakea -destination 'generic/platform=iOS' -derivedDataPath "$DD/dev" CODE_SIGNING_ALLOWED=NO build
-step "scripts/run-ios-sim-app.sh (demo on the simulator)" scripts/run-ios-sim-app.sh
 rm -rf .build .swiftpm
 [ -z "$(git status --porcelain)" ] || { RESULTS+=("FAIL  the working tree is clean after the run"); FAILED=$((FAILED + 1)); }
 

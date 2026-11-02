@@ -19,12 +19,18 @@ final class ProofModel: ObservableObject {
     @Published private(set) var phase: Phase = .loading
     @Published private(set) var proof: Proof?
     @Published private(set) var exportMessage: String?
+    /// The result of the last on-device verification, or why there is none.
+    @Published private(set) var verification: String?
     /// Wall-clock times and process memory of the last load and proof, for reading on a device.
     @Published private(set) var measurements: String?
     @Published var ageText = ""
 
     private var prover: Prover?
+    /// Built from the bundled `verification_key.json`; nil when none is bundled.
+    private var verifier: Verifier?
     private var loadSeconds: Double?
+
+    var canVerify: Bool { verifier != nil && proof != nil }
 
     /// What the public signals say: `out` is `publicSignals[0]`. A *valid* proof exists
     /// for both answers, so this is read from the signals, never from "proving worked".
@@ -52,7 +58,46 @@ final class ProofModel: ObservableObject {
         } catch {
             phase = .failed(describe(error))
         }
+        await loadVerifier()
     }
+
+    /// The verification key is bundled with the app: the verifier trusts this key, never one
+    /// that arrives with a proof. Without it the app still proves; it just cannot verify.
+    private func loadVerifier() async {
+        guard let url = Bundle.main.url(forResource: "verification_key", withExtension: "json") else {
+            verification = "No verification_key.json in the app bundle: on-device verification is off."
+            return
+        }
+        do {
+            verifier = try await Task.detached { try Verifier(verificationKeyAt: url) }.value
+        } catch {
+            verification = "The bundled verification key is unusable: \(describe(error))"
+        }
+    }
+
+    /// Verifies the current proof on this device with the bundled key, and, as a control, the
+    /// same proof with its first public signal (`out`) changed, which must not verify.
+    func verify() async {
+        guard let verifier, let proof, !proof.publicSignals.isEmpty else { return }
+        let start = ContinuousClock.now
+        do {
+            let valid = try await verifier.verify(proof)
+            let seconds = start.duration(to: .now).seconds
+            var altered = proof.publicSignals
+            altered[0] = altered[0] == "0" ? "1" : "0"
+            let alteredValid = try await verifier.verify(proofJSON: proof.proofJSON, publicSignals: altered)
+            verification = String(format: "%@ (%.0f ms). The same proof with out = %@: %@.",
+                                  valid ? "Valid on this device" : "NOT valid", seconds * 1000,
+                                  altered[0], alteredValid ? "ACCEPTED (unexpected)" : "rejected")
+            lastVerification = (valid, alteredValid)
+        } catch {
+            verification = "Could not verify: \(describe(error))"
+            lastVerification = nil
+        }
+    }
+
+    /// (proof valid, altered copy valid) from the last `verify()`; for the automation log.
+    private var lastVerification: (valid: Bool, altered: Bool)?
 
     func prove() async {
         guard let prover, let age = Int(ageText.trimmingCharacters(in: .whitespaces)), age >= 0, age <= 255 else {
@@ -62,6 +107,8 @@ final class ProofModel: ObservableObject {
         phase = .proving
         proof = nil
         exportMessage = nil
+        if verifier != nil { verification = nil }
+        lastVerification = nil
         let start = ContinuousClock.now
         do {
             proof = try await prover.prove(["age": .integer(age), "threshold": .integer(Self.threshold)])
@@ -97,13 +144,17 @@ final class ProofModel: ObservableObject {
         if let error = error as? LaniakeaError {
             return "\(error.localizedDescription)\n\(error.debugDescription)"
         }
+        if let error = error as? VerificationError {
+            return "\(error.localizedDescription)\n\(error.debugDescription)"
+        }
         return String(describing: error)
     }
 
     #if DEBUG
     /// Automation for the simulator (`-ConsumerAutoAge 25 -ConsumerAutoExport 1`): the
-    /// same code path as the buttons. The outcome is written to Documents/consumer.log
-    /// (stdout of a launched simulator app is not reliably captured).
+    /// same code path as the buttons, including on-device verification when a key is bundled.
+    /// The outcome is written to Documents/consumer.log (stdout of a launched simulator app
+    /// is not reliably captured).
     func autoRun() async {
         let defaults = UserDefaults.standard
         guard let age = defaults.string(forKey: "ConsumerAutoAge") else { return }
@@ -111,6 +162,12 @@ final class ProofModel: ObservableObject {
         ageText = age
         await prove()
         var lines = ["age=\(age) signals=\(proof?.publicSignals ?? []) phase=\(phase) outcome=\(outcome ?? "-") measurements=\(measurements ?? "-")"]
+        await verify()
+        if let lastVerification {
+            lines.append("verify: valid=\(lastVerification.valid) altered=\(lastVerification.altered) \(verification ?? "")")
+        } else {
+            lines.append("verify: none \(verification ?? "-")")
+        }
         if defaults.bool(forKey: "ConsumerAutoExport") {
             export()
             lines.append("export: \(exportMessage ?? "-")")

@@ -4,7 +4,8 @@
 # repository URL and exact version, with fresh package and derived-data caches and a
 # PATH without cargo/rustup. Builds for the generic iOS Simulator and generic iOS
 # (signing disabled), runs the app on a simulator for an eligible and an ineligible
-# age, exports proof.json/public.json, verifies both with snarkjs, and checks that a
+# age, verifies each proof inside the app with LaniakeaKit's Verifier (and rejects a copy with
+# an altered public signal), exports proof.json/public.json, verifies both with snarkjs, and checks that a
 # tampered public signal is rejected.
 #
 # Two modes. The report states which one ran, and they prove different things.
@@ -29,13 +30,14 @@
 #   scripts/release/validate-consumer.sh --remote <https-repository-URL> <version>
 #       REAL REMOTE. The same fixture resolves the published repository by https URL and
 #       exact version; SwiftPM downloads the release asset over HTTPS and checks its
-#       checksum. Needs a published tag whose manifest has the remote binary target; this
-#       has not been run, because nothing is published.
+#       checksum. Needs a published tag whose manifest has the remote binary target and,
+#       since the fixture calls Verifier, 0.1.0-rc.2 or later (0.1.0-rc.1 has no Verifier).
 #
 # Environment: SIM_DEVICE=<udid> (default: the single booted simulator),
 #   CIRCUIT_ARTIFACT / CIRCUIT_WASM (default: the repository's development age_check
 #   pair; test input standing in for the consumer's own circuit), VKEY (default:
-#   circuits/age_check/verification_key.json), KEEP_WORK=1 (keep the temporary directory).
+#   circuits/age_check/verification_key.json; bundled in the app and used by snarkjs),
+#   KEEP_WORK=1 (keep the temporary directory).
 # Needs full Xcode, git, python3 and snarkjs (on PATH or via npx). Writes only under a
 # temporary directory (TMPDIR). Creates no tag, commit or release in this repository.
 set -euo pipefail
@@ -44,7 +46,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=../lib/common.sh
 . "$ROOT/scripts/lib/common.sh"
 
-usage() { sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 64; }
+usage() { sed -n '2,43p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 64; }
 MODE="${1:-}"
 case "$MODE" in
   --rehearse) [ "$#" -eq 2 ] || usage; VERSION="$2"; REPO_URL="" ;;
@@ -56,8 +58,8 @@ grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$' <<<"$VERSIO
 for tool in git xcodebuild xcrun python3 ditto; do command -v "$tool" >/dev/null || die "$tool not found"; done
 SNARKJS=(snarkjs); command -v snarkjs >/dev/null || SNARKJS=(npx --no-install snarkjs)
 VKEY="${VKEY:-$ROOT/circuits/age_check/verification_key.json}"
-ART="${CIRCUIT_ARTIFACT:-$ROOT/examples/ios-age-app/AgeCheckApp/Resources/age_check.artifact}"
-WASM="${CIRCUIT_WASM:-$ROOT/examples/ios-age-app/AgeCheckApp/Resources/age_check.wasm}"
+ART="${CIRCUIT_ARTIFACT:-$ROOT/circuits/age_check/age_check.artifact}"
+WASM="${CIRCUIT_WASM:-$ROOT/circuits/age_check/age_check_js/age_check.wasm}"
 for f in "$VKEY" "$ART" "$WASM"; do [ -s "$f" ] || die "missing input file: $f"; done
 
 UDID="${SIM_DEVICE:-$(xcrun simctl list devices booted | sed -n 's/.*(\([0-9A-F-]\{36\}\)) (Booted).*/\1/p' | head -1)}"
@@ -123,6 +125,7 @@ cp -R "$ROOT/examples/ios-consumer/LaniakeaConsumer.xcodeproj" "$ROOT/examples/i
 rm -rf "$FIX/LaniakeaConsumer/Resources"; mkdir -p "$FIX/LaniakeaConsumer/Resources"
 cp "$ART" "$FIX/LaniakeaConsumer/Resources/age_check.artifact"
 cp "$WASM" "$FIX/LaniakeaConsumer/Resources/age_check.wasm"
+cp "$VKEY" "$FIX/LaniakeaConsumer/Resources/verification_key.json"
 "$ROOT/examples/ios-consumer/package-source.sh" remote --exact "$VERSION" --url "$REPO_URL" --project "$FIX/LaniakeaConsumer.xcodeproj/project.pbxproj" >/dev/null
 
 # --- builds with fresh caches and no Rust toolchain on PATH
@@ -175,15 +178,22 @@ run_age() { # <age> -> prints the data container's Documents path
   grep -q '^export:' "$docs/consumer.log" 2>/dev/null || die "age $age: the app did not report an export (see $docs/consumer.log)"
   echo "$docs"
 }
+check_device_verify() { # <age> <Documents dir>: LaniakeaKit's Verifier, inside the app, with the bundled key
+  grep -q '^verify: valid=true altered=false' "$2/consumer.log" \
+    || { cat "$2/consumer.log" >&2; die "age $1: on-device Verifier did not accept the proof and reject the altered copy"; }
+  echo "  on-device Verifier: valid, altered public signal rejected"
+}
 verify() { # <dir> -> snarkjs output; non-zero if it fails
   ( cd "$1" && "${SNARKJS[@]}" groth16 verify "$VKEY" public.json proof.json 2>&1 | sed 's/\x1b\[[0-9;]*m//g' )
 }
 mkdir -p "$WORK/out/25" "$WORK/out/10"
 echo "==> simulator run: age 25 (eligible)"
 D="$(run_age 25)"; grep -q 'signals=\["1", "18"\]' "$D/consumer.log" || { cat "$D/consumer.log"; die "age 25 did not give signals [1,18]"; }
+check_device_verify 25 "$D"
 cp "$D/proof.json" "$D/public.json" "$WORK/out/25/"
 echo "==> simulator run: age 10 (ineligible)"
 D="$(run_age 10)"; grep -q 'signals=\["0", "18"\]' "$D/consumer.log" || { cat "$D/consumer.log"; die "age 10 did not give signals [0,18]"; }
+check_device_verify 10 "$D"
 cp "$D/proof.json" "$D/public.json" "$WORK/out/10/"
 echo "  public signals: eligible $(tr -d ' \n' < "$WORK/out/25/public.json"), ineligible $(tr -d ' \n' < "$WORK/out/10/public.json")"
 [ "$(tr -d ' \n' < "$WORK/out/25/public.json")" = '["1","18"]' ] && [ "$(tr -d ' \n' < "$WORK/out/10/public.json")" = '["0","18"]' ] || die "unexpected exported public signals"

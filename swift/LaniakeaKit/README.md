@@ -2,8 +2,9 @@
 
 The Swift API over the Rust prover and verifier: `Circuit`, `Prover`, `Proof`, `Input`,
 `LaniakeaError`, `Verifier`, `VerificationError` (`Sources/LaniakeaKit`, handwritten, checked in), on top of the
-UniFFI-generated binding and the Rust static library. How to add it to an app: `docs/INTEGRATION.md`. Not published yet: for now the package
-is assembled locally (below). Circuit files stay outside the SDK binary.
+UniFFI-generated binding and the Rust static library. How to add it to an app: `docs/INTEGRATION.md`. Released
+versions resolve from GitHub (pre-releases `0.1.0-rc.1`, and `0.1.0-rc.2`, the first with `Verifier`); for
+development the package is assembled locally (below). Circuit files stay outside the SDK binary.
 
 ```swift
 import LaniakeaKit
@@ -16,11 +17,17 @@ let proof = try await prover.prove(["age": .integer(25), "threshold": .integer(1
 proof.publicSignals            // ["1", "18"]: read these; a valid proof can have out = 0
 proof.proofJSON                // snarkjs proof.json
 try proof.write(to: directory) // proof.json + public.json, for an independent verifier
+
+let verifier = try Verifier(verificationKeyAt: keyURL)       // the circuit's snarkjs verification_key.json
+let valid = try await verifier.verify(proof)                  // true, false, or throws VerificationError
 ```
 
-- **Verification is not done here.** `prove` generates; check with
-  `snarkjs groth16 verify verification_key.json public.json proof.json` (or any Groth16
-  verifier). A valid proof is not the application's answer: read the public signals.
+- **Proving does not verify.** `prove` generates; check with `Verifier` (on the device, against a
+  key the app chose, not one that came with the proof) or with
+  `snarkjs groth16 verify verification_key.json public.json proof.json`. Only `true` accepts: treat
+  `false` and a thrown `VerificationError` alike. Verifying on the device that made the proof only
+  checks the prover; it convinces no one else. A valid proof is not the application's answer: read
+  the public signals.
 - **Threading.** `Prover` is an actor, but actor isolation alone does not give a dedicated
   thread: building it and proving are synchronous Rust calls that run on a thread of
   Swift's cooperative pool, never on the main thread, and hold that thread until they
@@ -57,8 +64,8 @@ try proof.write(to: directory) // proof.json + public.json, for an independent v
 - **`age_check` is a development example, not production material.** The bundled artifact
   comes from a development trusted setup (one contribution, no ceremony records), and the
   circuit has known limitations (it does not constrain `out == 1` and does not range-check
-  its inputs). Do not ship it for real use. See *Security Model: Proving, Verifying, and
-  Deciding* and *Trusted Setup Provenance (age_check)* in the repository README.
+  its inputs). Do not ship it for real use. See *Your circuit, and what a proof means* in
+  `docs/INTEGRATION.md`.
 - **Artifact files are versioned.** An `.artifact` starts with a header (magic and format
   version, `docs/ARTIFACT_FORMAT.md`). A file from a newer format is
   `.unsupportedArtifactVersion(found:supported:)`; a missing header (an artifact from before
@@ -77,9 +84,9 @@ try proof.write(to: directory) // proof.json + public.json, for an independent v
 
 The Swift package is the repository's root `Package.swift`. On development branches its
 binary target is local (`Binaries/LaniakeaRustLib.xcframework`, built by you); only a tagged
-release commit carries a remote `url:`/`checksum:` binary target, and **nothing is published
-yet** (see the "Releasing" section of the root `README.md` for the release workflow, the manifest switching and what has
-and has not been tested). Product `LaniakeaKit`; targets:
+release commit carries a remote `url:`/`checksum:` binary target (the first was `0.1.0-rc.1`; see the
+"Releasing" section of the root `README.md` for the release workflow and the manifest switching, and
+`docs/INTEGRATION.md` for what has and has not been tested). Product `LaniakeaKit`; targets:
 
 ```
 LaniakeaKit (Swift, handwritten)  -> internal import _LaniakeaBindings
@@ -117,10 +124,10 @@ scripts/check-bindings.sh           # committed generated sources == a fresh gen
   15.0, which `build-ios.sh` verifies per archive member; `package-xcframework.sh` refuses
   to run if the manifest disagrees). 15.0 is the lowest the iOS 27.1 SDK accepts for the
   Swift targets. **Declared is not validated:** the oldest iOS this has been run on is the
-  iOS 27.x simulator (and, per the maintainer, one physical iPhone 16 for the earlier
-  package layout). Nothing from 15 to 26 has been run.
+  iOS 27.x simulator, and one iPhone 16 on iOS 26.6.2 (an app using the published
+  `0.1.0-rc.1`). Nothing from 15 to 25 has been run.
 - Never edit the generated `laniakea.swift` or `laniakeaFFI.h`; regenerate them.
-- Built and consumed by Xcode: `examples/ios-age-app` and `examples/ios-consumer` use the
-  root package as a local dependency; `scripts/run-ios-sim-app.sh` compiles the same
-  sources with swiftc. Not exercised: a standalone `swift build`, a remote resolve, and any
-  run on a physical device with this layout.
+- Built and consumed by Xcode: `examples/ios-consumer` (with `package-source.sh local`) and
+  `scripts/release/validate-consumer.sh --rehearse` use the root package. A remote resolve of `0.1.0-rc.1` from GitHub has been exercised
+  (`scripts/release/validate-consumer.sh --remote`), and one physical-device run (see
+  `docs/INTEGRATION.md`). Not exercised: a standalone `swift build`.

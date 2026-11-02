@@ -6,9 +6,9 @@
 // Targets, from the bottom:
 //   LaniakeaRustLib   binary: the Rust static libraries (ios-arm64 and ios-arm64-simulator),
 //                     with no C headers and no module maps. Built locally by
-//                     scripts/package-xcframework.sh into Binaries/ (git-ignored). A release
-//                     would replace `path:` with a versioned `url:` and `checksum:`; none
-//                     is published yet.
+//                     scripts/package-xcframework.sh into Binaries/ (git-ignored). Only a
+//                     release commit (the one a version tag points at) replaces `path:` with
+//                     a versioned `url:` and `checksum:` (scripts/release/set-binary-target.sh).
 //   laniakeaFFI       C: owns the generated header; SwiftPM derives the module map from it.
 //   _LaniakeaBindings Swift: the UniFFI-generated binding (committed, never edited by hand;
 //                     scripts/check-bindings.sh compares it with a fresh generation).
