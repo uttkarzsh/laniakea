@@ -59,7 +59,9 @@ let valid = try await verifier.verify(proof)              // true, false, or thr
 
 **Full guide** (installation details, circuit files, errors, verification, limitations, the example circuit's
 caveats): [`docs/INTEGRATION.md`](docs/INTEGRATION.md). A complete SwiftUI app doing this:
-[`examples/ios-consumer`](examples/ios-consumer).
+[`examples/ios-consumer`](examples/ios-consumer). A standalone example with a larger circuit (SHA-256, 31,330
+constraints), proving and verifying on an iPhone, with benchmarks:
+[ios-sha-app](https://github.com/uttkarzsh/ios-sha-app).
 
 ## How it works
 
