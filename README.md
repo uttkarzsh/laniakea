@@ -7,9 +7,9 @@ Swift as the package `LaniakeaKit`.
 
 > **Status: early and unaudited.** Releases are published on the
 > [GitHub releases page](https://github.com/uttkarzsh/laniakea/releases); the current one is the pre-release
-> `0.1.0-rc.2`, the first with on-device verification (`Verifier`). Tested on iOS 27 simulators; proving also on
-> one physical iPhone 16 (details in `docs/INTEGRATION.md`). The only circuit here, `age_check`, is a development
-> example, not production material.
+> `0.1.0-rc.2`, the first with on-device verification (`Verifier`). Tested on iOS 27 simulators and on one
+> physical iPhone 16, proving and verifying (details in `docs/INTEGRATION.md`). The only circuit here,
+> `age_check`, is a development example, not production material.
 
 ## Features
 
@@ -132,7 +132,8 @@ versions are consumable; a `branch:` dependency gets the local form and cannot r
 5. Switch the development branch back with `set-binary-target.sh --local`. Never replace an uploaded asset;
    publish a new version instead.
 
-Physical device: `DEVELOPMENT_TEAM=<id> examples/ios-consumer/run-on-device.sh "<device>"` (never run yet).
+Physical device: `DEVELOPMENT_TEAM=<id> examples/ios-consumer/run-on-device.sh "<device>"` (run on an iPhone 16;
+results in `docs/INTEGRATION.md`).
 
 ## License
 

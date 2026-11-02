@@ -202,8 +202,14 @@ outside this repository that depends on `0.1.0-rc.1` by URL, with its own SHA-25
 31,330 constraints, 16 MB artifact), ran on an iPhone 16 (iOS 26.6.2, Debug build): loading about 7.3 s, one
 proof about 0.47 s; snarkjs on a Mac verified the proof copied from the phone. One run; memory was not measured.
 
-Not tested: the examples in this repository on a physical iPhone (`examples/ios-consumer/run-on-device.sh` has
-never run); `Verifier` on a physical iPhone (only on the simulator); Xcode 16.x; iOS below 26.
+Also tested, for `0.1.0-rc.2`: the example app (`examples/ios-consumer/run-on-device.sh`, Debug build) on the
+same iPhone 16, linked against libraries byte-identical to those in the release asset (through a local package
+reference, not a download). For ages 25 and 10 it loaded in under 0.1 s and proved in under 0.01 s; `Verifier`
+on the phone accepted each proof (20 ms and 4 ms) and rejected it with `out` altered; snarkjs on a Mac verified
+both proofs and rejected the age-10 proof with the age-25 public signals. Memory footprint about 15 MB. One run
+of a tiny circuit, so the timings say little about real circuits.
+
+Not tested: Xcode 16.x; iOS below 26; Release builds on a device; memory use of a large circuit on a device.
 
 Known limits: the libraries are about 27 MB per architecture slice before the linker strips them
 (app-size impact unmeasured); the library exports many Rust symbols, so linking it next to another Rust

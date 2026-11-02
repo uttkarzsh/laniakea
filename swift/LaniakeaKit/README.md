@@ -125,9 +125,10 @@ scripts/check-bindings.sh           # committed generated sources == a fresh gen
   to run if the manifest disagrees). 15.0 is the lowest the iOS 27.1 SDK accepts for the
   Swift targets. **Declared is not validated:** the oldest iOS this has been run on is the
   iOS 27.x simulator, and one iPhone 16 on iOS 26.6.2 (an app using the published
-  `0.1.0-rc.1`). Nothing from 15 to 25 has been run.
+  `0.1.0-rc.1`, and the example app with the `0.1.0-rc.2` libraries). Nothing from 15 to 25
+  has been run.
 - Never edit the generated `laniakea.swift` or `laniakeaFFI.h`; regenerate them.
 - Built and consumed by Xcode: `examples/ios-consumer` (with `package-source.sh local`) and
   `scripts/release/validate-consumer.sh --rehearse` use the root package. A remote resolve of `0.1.0-rc.1` from GitHub has been exercised
-  (`scripts/release/validate-consumer.sh --remote`), and one physical-device run (see
-  `docs/INTEGRATION.md`). Not exercised: a standalone `swift build`.
+  (`scripts/release/validate-consumer.sh --remote`), and physical-device runs, proving and
+  verifying (see `docs/INTEGRATION.md`). Not exercised: a standalone `swift build`.

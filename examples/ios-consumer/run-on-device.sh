@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 # Builds the consumer app for a connected iPhone, runs it for an eligible and an ineligible age,
 # copies back the exported proofs and the app's log (which has the proving time, memory and the
-# result of LaniakeaKit's on-device Verifier), and verifies both proofs with snarkjs. NOT YET RUN: written while no iPhone was reachable, so treat
-# its first run as a test of the script as well.
+# result of LaniakeaKit's on-device Verifier), and verifies both proofs with snarkjs. Run on an
+# iPhone 16 with iOS 26.6.2 (results in docs/INTEGRATION.md).
 #
 #   DEVELOPMENT_TEAM=<your team id> examples/ios-consumer/run-on-device.sh <device name or UDID>
 #
 # The device must be unlocked, paired and in Developer Mode (`xcrun devicectl list devices` shows
-# it as available). The team ID is yours and is never written into the project. The package must
+# it as available), and must trust the developer profile (Settings > General > VPN & Device
+# Management). The team ID is yours and is never written into the project. The package must
 # resolve: `package-source.sh local` while working in this checkout, or the published version.
 # Circuit files: run prepare.sh first (see README.md). Needs snarkjs.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-DEVICE="${1:-}"; [ -n "$DEVICE" ] || { sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 64; }
+DEVICE="${1:-}"; [ -n "$DEVICE" ] || { sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 64; }
 : "${DEVELOPMENT_TEAM:?set DEVELOPMENT_TEAM to your Apple developer team ID}"
 VKEY="${VKEY:-$ROOT/circuits/age_check/verification_key.json}"
 SNARKJS=(snarkjs); command -v snarkjs >/dev/null || SNARKJS=(npx --no-install snarkjs)

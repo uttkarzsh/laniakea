@@ -72,7 +72,9 @@ thing. See the "Releasing" section of the root `README.md`.
 
 `run-on-device.sh <device> ` builds, installs, runs the app for ages 25 and 10, copies back the
 proofs and the log (proving time, memory, the on-device `Verifier` result) and verifies them with snarkjs. It needs your
-`DEVELOPMENT_TEAM`, an unlocked connected device in Developer Mode, and has **not been run yet**.
+`DEVELOPMENT_TEAM`, an unlocked connected device in Developer Mode, and the app's developer profile trusted
+on the device (*Settings ▸ General ▸ VPN & Device Management*; until then iOS refuses to launch it). It has
+been run on an iPhone 16 with iOS 26.6.2 (results in `docs/INTEGRATION.md`).
 
 ## Export and verify
 
