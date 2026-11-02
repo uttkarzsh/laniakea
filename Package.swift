@@ -34,7 +34,7 @@ let package = Package(
         .library(name: "LaniakeaKit", targets: ["LaniakeaKit"]),
     ],
     targets: [
-        .binaryTarget(name: "LaniakeaRustLib", path: "Binaries/LaniakeaRustLib.xcframework"),
+        .binaryTarget(name: "LaniakeaRustLib", url: "https://github.com/uttkarzsh/laniakea/releases/download/0.1.0-rc.2/LaniakeaRustLib-0.1.0-rc.2.xcframework.zip", checksum: "a44f3b89ace1fad61e24b38b9ea6821303a3b9eb82a9fa58df6e8b40eb7e9630"),
         .target(
             name: "laniakeaFFI",
             path: "swift/LaniakeaKit/Sources/laniakeaFFI",
