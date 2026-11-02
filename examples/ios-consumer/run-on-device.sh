@@ -35,15 +35,20 @@ xcrun devicectl device install app --device "$UDID" "$APP" > "$WORK/install.log"
 
 for age in 25 10; do
   echo "==> age $age"
-  xcrun devicectl device process launch --device "$UDID" --terminate-existing "$BUNDLE" -ConsumerAutoAge "$age" -ConsumerAutoExport 1 > "$WORK/launch-$age.log" 2>&1 \
+  # `--` ends devicectl's options: otherwise it parses -ConsumerAutoAge as its own short flags.
+  xcrun devicectl device process launch --device "$UDID" --terminate-existing -- "$BUNDLE" -ConsumerAutoAge "$age" -ConsumerAutoExport 1 > "$WORK/launch-$age.log" 2>&1 \
     || { cat "$WORK/launch-$age.log" >&2; exit 1; }
   mkdir -p "$WORK/out/$age"
-  for _ in $(seq 1 60); do   # the app writes consumer.log last
+  # The app deletes consumer.log when the run starts and writes it last; the age check
+  # keeps the previous age's log from being taken for this one.
+  done_for_age() { grep -q "^age=$age " "$WORK/out/$age/consumer.log" && grep -q '^export:' "$WORK/out/$age/consumer.log"; }
+  for _ in $(seq 1 60); do
+    rm -f "$WORK/out/$age/consumer.log"
     xcrun devicectl device copy from --device "$UDID" --domain-type appDataContainer --domain-identifier "$BUNDLE" \
-      --source Documents/consumer.log --destination "$WORK/out/$age/consumer.log" >/dev/null 2>&1 && grep -q '^export:' "$WORK/out/$age/consumer.log" && break
+      --source Documents/consumer.log --destination "$WORK/out/$age/consumer.log" >/dev/null 2>&1 && done_for_age && break
     sleep 2
   done
-  grep -q '^export:' "$WORK/out/$age/consumer.log" || { echo "error: no result for age $age" >&2; exit 1; }
+  done_for_age || { echo "error: no result for age $age" >&2; exit 1; }
   for f in proof.json public.json; do
     xcrun devicectl device copy from --device "$UDID" --domain-type appDataContainer --domain-identifier "$BUNDLE" \
       --source "Documents/$f" --destination "$WORK/out/$age/$f" >/dev/null

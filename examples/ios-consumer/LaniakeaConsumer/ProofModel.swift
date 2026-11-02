@@ -158,6 +158,9 @@ final class ProofModel: ObservableObject {
     func autoRun() async {
         let defaults = UserDefaults.standard
         guard let age = defaults.string(forKey: "ConsumerAutoAge") else { return }
+        let documents = try? FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        // A log from an earlier run must not be read as this run's result.
+        if let documents { try? FileManager.default.removeItem(at: documents.appendingPathComponent("consumer.log")) }
         await load()
         ageText = age
         await prove()
@@ -172,7 +175,7 @@ final class ProofModel: ObservableObject {
             export()
             lines.append("export: \(exportMessage ?? "-")")
         }
-        if let documents = try? FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true) {
+        if let documents {
             try? (lines.joined(separator: "\n") + "\n").write(to: documents.appendingPathComponent("consumer.log"), atomically: true, encoding: .utf8)
         }
     }
